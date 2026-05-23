@@ -844,6 +844,7 @@ export async function runPreDispatch(
 
   // Pre-dispatch health gate
   try {
+    const expectedCurrentUnit = null;
     const healthGate = await deps.preDispatchHealthGate(s.basePath);
     if (healthGate.fixesApplied.length > 0) {
       ctx.ui.notify(
@@ -864,7 +865,7 @@ export async function runPreDispatch(
         healthGate.reason || "Pre-dispatch health check failed — run /gsd doctor for details.",
         "error",
       );
-      await deps.pauseAuto(ctx, pi);
+      await deps.pauseAuto(ctx, pi, undefined, { expectedCurrentUnit });
       debugLog("autoLoop", { phase: "exit", reason: "health-gate-failed" });
       return { action: "break", reason: "health-gate-failed" };
     }

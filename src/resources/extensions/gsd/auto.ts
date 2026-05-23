@@ -241,7 +241,7 @@ import { bootstrapAutoSession, openProjectDbIfPresent, type BootstrapDeps } from
 import { initHealthWidget } from "./health-widget.js";
 import { runLegacyAutoLoop, runUokKernelLoop } from "./auto/loop.js";
 import { resolveAgentEnd, resolveAgentEndCancelled, _resetPendingResolve, isSessionSwitchInFlight } from "./auto/resolve.js";
-import type { LoopDeps, StopAutoOptions } from "./auto/loop-deps.js";
+import type { LoopDeps, PauseAutoOptions, PauseAutoUnitIdentity, StopAutoOptions } from "./auto/loop-deps.js";
 import type { ErrorContext } from "./auto/types.js";
 import { runAutoLoopWithUok } from "./uok/kernel.js";
 import { resolveUokFlags } from "./uok/flags.js";
@@ -1039,6 +1039,23 @@ function currentUnitLabel(): string | null {
   return `${unitVerb(s.currentUnit.type)} ${s.currentUnit.id}`;
 }
 
+export function capturePauseAutoUnitIdentity(): PauseAutoUnitIdentity | null {
+  if (!s.currentUnit) return null;
+  return {
+    type: s.currentUnit.type,
+    id: s.currentUnit.id,
+    startedAt: s.currentUnit.startedAt,
+  };
+}
+
+function pauseAutoUnitIdentityMatches(expected: PauseAutoUnitIdentity | null): boolean {
+  if (!s.currentUnit) return expected === null;
+  return expected !== null &&
+    s.currentUnit.type === expected.type &&
+    s.currentUnit.id === expected.id &&
+    s.currentUnit.startedAt === expected.startedAt;
+}
+
 function setLifecycleOutcome(
   ctx: ExtensionContext | undefined,
   input: {
@@ -1759,8 +1776,19 @@ export async function pauseAuto(
   ctx?: ExtensionContext,
   _pi?: ExtensionAPI,
   _errorContext?: ErrorContext,
+  options: PauseAutoOptions = {},
 ): Promise<void> {
   if (!s.active) return;
+  if (
+    Object.prototype.hasOwnProperty.call(options, "expectedCurrentUnit") &&
+    !pauseAutoUnitIdentityMatches(options.expectedCurrentUnit ?? null)
+  ) {
+    debugLog("pause-auto-stale-unit-guard", {
+      expectedCurrentUnit: options.expectedCurrentUnit ?? null,
+      currentUnit: s.currentUnit,
+    });
+    return;
+  }
   s.active = false;
   clearUnitTimeout();
   stopAutoCommandPolling();

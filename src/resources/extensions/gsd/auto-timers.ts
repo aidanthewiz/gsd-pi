@@ -23,6 +23,7 @@ import { closeoutUnit, type CloseoutOptions } from "./auto-unit-closeout.js";
 import { saveActivityLog } from "./activity-log.js";
 import { recoverTimedOutUnit, type RecoveryContext } from "./auto-timeout-recovery.js";
 import { resolveAgentEndCancelled } from "./auto/resolve.js";
+import type { PauseAutoOptions } from "./auto/loop-deps.js";
 import type { AutoSession } from "./auto/session.js";
 import { logWarning, logError } from "./workflow-logger.js";
 
@@ -35,7 +36,7 @@ export interface SupervisionContext {
   prefs: GSDPreferences | undefined;
   buildSnapshotOpts: () => CloseoutOptions & Record<string, unknown>;
   buildRecoveryContext: () => RecoveryContext;
-  pauseAuto: (ctx?: ExtensionContext, pi?: ExtensionAPI) => Promise<void>;
+  pauseAuto: (ctx?: ExtensionContext, pi?: ExtensionAPI, errorContext?: undefined, options?: PauseAutoOptions) => Promise<void>;
   /** Optional task estimate string (e.g. "30m", "2h") for timeout scaling (#2243). */
   taskEstimate?: string;
 }
@@ -181,6 +182,11 @@ export function startUnitSupervision(sctx: SupervisionContext): void {
   s.idleWatchdogHandle = setInterval(async () => {
     try {
       if (!s.active || !s.currentUnit) return;
+      const expectedCurrentUnit = {
+        type: s.currentUnit.type,
+        id: s.currentUnit.id,
+        startedAt: s.currentUnit.startedAt,
+      };
       const runtime = readUnitRuntimeRecord(s.basePath, unitType, unitId);
       if (!runtime) return;
       if (Date.now() - runtime.lastProgressAt < idleTimeoutMs) return;
@@ -250,7 +256,7 @@ export function startUnitSupervision(sctx: SupervisionContext): void {
         `Unit ${unitType} ${unitId} made no meaningful progress for ${supervisor.idle_timeout_minutes}min. Pausing auto-mode.`,
         "warning",
       );
-      await pauseAuto(ctx, pi);
+      await pauseAuto(ctx, pi, undefined, { expectedCurrentUnit });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logError("timer", `[idle-watchdog] Unhandled error: ${message}`);
@@ -269,6 +275,9 @@ export function startUnitSupervision(sctx: SupervisionContext): void {
     try {
       s.unitTimeoutHandle = null;
       if (!s.active) return;
+      const expectedCurrentUnit = s.currentUnit
+        ? { type: s.currentUnit.type, id: s.currentUnit.id, startedAt: s.currentUnit.startedAt }
+        : null;
       if (s.currentUnit) {
         writeUnitRuntimeRecord(s.basePath, unitType, unitId, s.currentUnit.startedAt, {
           phase: "timeout",
@@ -286,7 +295,7 @@ export function startUnitSupervision(sctx: SupervisionContext): void {
         `Unit ${unitType} ${unitId} exceeded ${supervisor.hard_timeout_minutes}min hard timeout. Pausing auto-mode.`,
         "warning",
       );
-      await pauseAuto(ctx, pi);
+      await pauseAuto(ctx, pi, undefined, { expectedCurrentUnit });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logError("timer", `[hard-timeout] Unhandled error: ${message}`);

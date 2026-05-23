@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { pauseAuto, isAutoActive } from "../auto.ts";
+import { capturePauseAutoUnitIdentity, pauseAuto, isAutoActive } from "../auto.ts";
 import { autoSession } from "../auto-runtime-state.ts";
 import { _isPauseOriginCancelledResult } from "../auto/phases.ts";
 
@@ -73,4 +73,78 @@ test("transient-abort errorContext is not classified as pause-origin cancellatio
     false,
     "not paused = not pause-origin regardless of errorContext",
   );
+});
+
+test("pauseAuto ignores stale pre-dispatch pause once a new unit is active", async () => {
+  autoSession.reset();
+  autoSession.active = true;
+  autoSession.currentUnit = {
+    type: "research-slice",
+    id: "M011/S05",
+    startedAt: 500,
+  };
+
+  try {
+    await pauseAuto(undefined, undefined, undefined, { expectedCurrentUnit: null });
+
+    assert.equal(autoSession.active, true);
+    assert.equal(autoSession.paused, false);
+    assert.deepEqual(autoSession.currentUnit, {
+      type: "research-slice",
+      id: "M011/S05",
+      startedAt: 500,
+    });
+  } finally {
+    autoSession.reset();
+  }
+});
+
+test("pauseAuto ignores stale pause for a superseded unit identity", async () => {
+  autoSession.reset();
+  autoSession.active = true;
+  autoSession.currentUnit = {
+    type: "research-slice",
+    id: "M011/S05",
+    startedAt: 500,
+  };
+
+  try {
+    await pauseAuto(undefined, undefined, undefined, {
+      expectedCurrentUnit: {
+        type: "plan-slice",
+        id: "M011/S04",
+        startedAt: 100,
+      },
+    });
+
+    assert.equal(autoSession.active, true);
+    assert.equal(autoSession.paused, false);
+    assert.deepEqual(autoSession.currentUnit, {
+      type: "research-slice",
+      id: "M011/S05",
+      startedAt: 500,
+    });
+  } finally {
+    autoSession.reset();
+  }
+});
+
+test("pauseAuto still pauses when the expected unit identity matches", async () => {
+  autoSession.reset();
+  autoSession.active = true;
+  autoSession.currentUnit = {
+    type: "research-slice",
+    id: "M011/S05",
+    startedAt: 500,
+  };
+  const expectedCurrentUnit = capturePauseAutoUnitIdentity();
+
+  try {
+    await pauseAuto(undefined, undefined, undefined, { expectedCurrentUnit });
+
+    assert.equal(autoSession.active, false);
+    assert.equal(autoSession.paused, true);
+  } finally {
+    autoSession.reset();
+  }
 });
