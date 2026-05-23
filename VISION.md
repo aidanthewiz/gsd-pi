@@ -34,7 +34,11 @@ These save everyone time. Don't open PRs for:
 
 ## Why this project exists
 
-gsd-pi is the community-driven continuation of the original GSD project under the [open-gsd](https://github.com/open-gsd) organization. The original effort broke trust with the people who supported it. Rather than walking away, we're rebuilding in the open — with a different approach and a clear set of commitments. See [The Promise](https://www.opengsd.net/promise) for the full story.
+gsd-pi is the community-driven continuation of the original GSD project under the [open-gsd](https://github.com/open-gsd) organization.
+
+**What happened, briefly and honestly:** the original maintainer (TÂCHES) became unreachable in 2026 and stopped responding to the community. Around the same time, a `$GSD` token was launched and then collapsed — the founder withdrew liquidity and sold their holdings before disappearing, and the event has been publicly characterized as a rug-pull. Supporters lost money, and trust in the original project was broken. With the original repositories effectively abandoned and the maintainer gone, the community treats them as unmaintained and continues the work here instead. See [The Promise](https://www.opengsd.net/promise) for the fuller story.
+
+Rather than walking away, we're rebuilding in the open — with a different approach and a clear set of commitments.
 
 What that means for this project:
 
