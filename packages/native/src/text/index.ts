@@ -93,7 +93,7 @@ function fallbackTruncateToWidth(
   const width = Math.max(0, Math.floor(maxWidth));
   const plain = stripAnsi(text);
   if (fallbackVisibleWidth(plain, tabWidth) <= width) {
-    return pad ? plain + " ".repeat(Math.max(0, width - fallbackVisibleWidth(plain, tabWidth))) : plain;
+    return pad ? text + " ".repeat(Math.max(0, width - fallbackVisibleWidth(plain, tabWidth))) : text;
   }
 
   const ellipsis = ellipsisKind === 0 ? "\u2026" : ellipsisKind === 1 ? "..." : "";
