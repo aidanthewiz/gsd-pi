@@ -26,6 +26,17 @@ test("execute-task fails closed when no host-owned checks are discovered", () =>
   assert.match(verdict.failureContext, /No runnable host-owned verification command/);
 });
 
+test("execute-task passes when non-runnable task-plan prose is the verification source", () => {
+  const verdict = decideVerificationVerdict(
+    "execute-task",
+    makeResult({ discoverySource: "task-plan-prose" }),
+  );
+
+  assert.equal(verdict.passed, true);
+  assert.equal(verdict.reason, "passed");
+  assert.equal(verdict.retryable, false);
+});
+
 test("non execute-task units preserve no-check pass semantics", () => {
   const verdict = decideVerificationVerdict("plan-slice", makeResult());
 

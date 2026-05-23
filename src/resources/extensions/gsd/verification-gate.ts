@@ -49,13 +49,29 @@ const PACKAGE_SCRIPT_KEYS = ["typecheck", "lint", "test"] as const;
  *   6. None found
  */
 export function discoverCommands(options: DiscoverCommandsOptions): DiscoveredCommands {
+  const taskPlanVerify = options.taskPlanVerify && options.taskPlanVerify.trim()
+    ? options.taskPlanVerify
+    : undefined;
+  let hasTaskPlanProse = false;
+  let hasUnsafeTaskPlanCommand = false;
+
   // 1. Task plan verify field (commands are untrusted — sanitize)
-  if (options.taskPlanVerify && options.taskPlanVerify.trim()) {
-    const commands = options.taskPlanVerify
+  if (taskPlanVerify) {
+    const commands: string[] = [];
+    const candidates = taskPlanVerify
       .split(/&&|\r?\n/)
       .map(c => c.trim())
-      .filter(Boolean)
-      .filter(c => sanitizeCommand(c) !== null);
+      .filter(Boolean);
+    for (const candidate of candidates) {
+      const validation = validateVerificationCommand(candidate);
+      if (validation.ok) {
+        commands.push(candidate);
+      } else if (validation.reason === "does not look like a runnable command") {
+        hasTaskPlanProse = true;
+      } else {
+        hasUnsafeTaskPlanCommand = true;
+      }
+    }
     if (commands.length > 0) {
       return { commands, source: "task-plan" };
     }
@@ -101,6 +117,10 @@ export function discoverCommands(options: DiscoverCommandsOptions): DiscoveredCo
   const nodeTestCommand = discoverNodeTestFileCommand(options.cwd);
   if (nodeTestCommand) {
     return { commands: [nodeTestCommand], source: "node-test-file" };
+  }
+
+  if (hasTaskPlanProse && !hasUnsafeTaskPlanCommand) {
+    return { commands: [], source: "task-plan-prose" };
   }
 
   // 6. Nothing found
@@ -348,12 +368,6 @@ export function validateVerificationCommand(cmd: string): { ok: true } | { ok: f
   return { ok: true };
 }
 
-function sanitizeCommand(cmd: string): string | null {
-  const validation = validateVerificationCommand(cmd);
-  if (!validation.ok) return null;
-  return cmd;
-}
-
 export interface RunVerificationGateOptions {
   cwd: string;
   preferenceCommands?: string[];
@@ -383,6 +397,8 @@ function mergeDiscoverySource(
     "task-plan",
     "package-json",
     "python-project",
+    "node-test-file",
+    "task-plan-prose",
   ];
   for (const source of precedence) {
     if (sources.includes(source)) return source;

@@ -19,6 +19,15 @@ export function decideVerificationVerdict(
   unitType: string,
   result: VerificationGateResult,
 ): VerificationVerdict {
+  if (unitType === "execute-task" && result.discoverySource === "task-plan-prose" && result.checks.length === 0) {
+    return {
+      passed: true,
+      reason: "passed",
+      retryable: false,
+      failureContext: "",
+    };
+  }
+
   if (unitType === "execute-task" && result.discoverySource === "none" && result.checks.length === 0) {
     return {
       passed: false,

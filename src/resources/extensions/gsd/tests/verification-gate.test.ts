@@ -202,12 +202,12 @@ describe("verification-gate: discovery", () => {
     assert.deepStrictEqual(result.commands, ["npm run test"]);
   });
 
-  test("prose taskPlanVerify with no package.json → source none", () => {
+  test("prose taskPlanVerify with no fallback checks → source task-plan-prose", () => {
     const result = discoverCommands({
-      taskPlanVerify: "Verify the output matches expected format and all fields are present",
+      taskPlanVerify: "Grep: pattern=Chart.yaml path=argocd-apps/ returns non-empty",
       cwd: tmp,
     });
-    assert.equal(result.source, "none");
+    assert.equal(result.source, "task-plan-prose");
     assert.deepStrictEqual(result.commands, []);
   });
 
