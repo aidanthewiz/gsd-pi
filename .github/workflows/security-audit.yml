@@ -102,7 +102,7 @@ jobs:
 
       - name: Upload npm audit results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: npm-audit-${{ matrix.artifact }}
           path: |
@@ -154,7 +154,7 @@ jobs:
 
       - name: Upload cargo audit results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: cargo-audit
           path: |

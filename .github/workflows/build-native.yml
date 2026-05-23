@@ -101,7 +101,7 @@ jobs:
           copy native\target\${{ matrix.target }}\release\gsd_engine.dll artifacts\gsd_engine.node
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: native-${{ matrix.platform }}
           path: artifacts/gsd_engine.node
@@ -137,7 +137,7 @@ jobs:
           fi
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: artifacts
 

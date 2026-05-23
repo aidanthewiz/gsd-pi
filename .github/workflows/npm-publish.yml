@@ -75,7 +75,7 @@ jobs:
         run: npm --prefix web ci
 
       - name: Cache Next.js build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: web/.next/cache
           key: nextjs-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}-${{ hashFiles('web/app/**', 'web/components/**', 'web/lib/**', 'web/hooks/**') }}
@@ -211,7 +211,7 @@ jobs:
           node -e "const v=require('child_process').execSync('npm --version',{encoding:'utf8'}).trim().split('.').map(Number); if (v[0] < 11 || (v[0] === 11 && v[1] < 5) || (v[0] === 11 && v[1] === 5 && v[2] < 1)) { throw new Error('Trusted publishing requires npm >= 11.5.1'); }"
 
       - name: Cache Next.js build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: web/.next/cache
           key: nextjs-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}-${{ hashFiles('web/app/**', 'web/components/**', 'web/lib/**', 'web/hooks/**') }}
