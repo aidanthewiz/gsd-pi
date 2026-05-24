@@ -17,6 +17,11 @@ on:
   create:
   delete:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Optional release tag to test. Leave blank to use the latest release.
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -28,6 +33,8 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_CHANGELOG_WEBHOOK }}
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
     steps:
       - name: Post changelog to Discord
         shell: bash
@@ -35,15 +42,24 @@ jobs:
           cat > discord-changelog.mjs <<'NODE'
           import { readFile } from "node:fs/promises";
 
-          const eventName = process.env.GITHUB_EVENT_NAME;
+          let eventName = process.env.GITHUB_EVENT_NAME;
           const eventPath = process.env.GITHUB_EVENT_PATH;
           const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
+          const githubToken = process.env.GH_TOKEN;
+          const repoSlug = process.env.GITHUB_REPOSITORY;
+          const releaseTag = process.env.RELEASE_TAG;
 
           if (!webhookUrl) {
             throw new Error("Missing DISCORD_CHANGELOG_WEBHOOK secret.");
           }
 
-          const event = JSON.parse(await readFile(eventPath, "utf8"));
+          let event = JSON.parse(await readFile(eventPath, "utf8"));
+
+          if (eventName === "workflow_dispatch") {
+            event = await fetchReleaseEvent({ githubToken, repoSlug, releaseTag });
+            eventName = "release";
+          }
+
           const payload = buildPayload(eventName, event);
 
           const response = await fetch(webhookUrl, {
@@ -70,31 +86,15 @@ jobs:
             };
           }
 
-          function buildContent(eventName, event) {
-            const repo = getRepoName(event);
-
-            if (eventName === "release") {
-              const tag = event.release?.tag_name || event.release?.name || "release";
-              const action = event.action === "published" ? "published" : event.action || "updated";
-              return `**${repo}** ${action} **${tag}**`;
+          async function fetchReleaseEvent({ githubToken, repoSlug, releaseTag }) {
+            if (!githubToken) {
+              throw new Error("Missing GitHub token.");
             }
 
-            return `**${repo}** update from ${getActor(event)}`;
-          }
-
-          function buildEmbed(eventName, event) {
-            if (eventName === "release") {
-              return buildReleaseEmbed(event);
+            if (!repoSlug) {
+              throw new Error("Missing GITHUB_REPOSITORY.");
             }
 
-            if (eventName === "push") {
-              return buildPushEmbed(event);
-            }
-
-            if (eventName === "pull_request") {
-              return buildPullRequestEmbed(event);
-            }
-
-            if (eventName === "create" || eventName === "delete") {
-              return buildRefEmbed(eventName, event);
-            }
+            const releasePath = releaseTag
+              ? `/repos/${repoSlug}/releases/tags/${encodeURIComponent(releaseTag)}`
+              : `/repos/${repoSlug}/releases/latest`;
