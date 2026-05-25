@@ -14,7 +14,9 @@ export async function exchangePairingCode(params: {
   code: string;
   runtimeName?: string;
 }): Promise<PairingExchangeResult> {
-  const response = await fetch(new URL("/pairing/exchange", params.gatewayUrl), {
+  const pairingUrl = new URL("/pairing/exchange", parseCloudGatewayUrl(params.gatewayUrl));
+  // lgtm[js/request-forgery] Gateway URLs are operator-supplied cloud endpoints validated by parseCloudGatewayUrl.
+  const response = await fetch(pairingUrl, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ code: params.code, runtimeName: params.runtimeName }),
@@ -29,6 +31,32 @@ export async function exchangePairingCode(params: {
   return { runtimeId: body.runtimeId, deviceToken: body.deviceToken };
 }
 
+export function parseCloudGatewayUrl(value: string): URL {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("Cloud gateway URL must be an absolute HTTP(S) URL");
+  }
+
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error("Cloud gateway URL must use http or https");
+  }
+  if (url.username || url.password) {
+    throw new Error("Cloud gateway URL must not include credentials");
+  }
+  if (url.hash) {
+    throw new Error("Cloud gateway URL must not include a fragment");
+  }
+  if (url.protocol === "http:" && !isLoopbackHost(url.hostname)) {
+    throw new Error("Plain HTTP cloud gateway URLs are only allowed for localhost");
+  }
+
+  url.pathname = url.pathname.replace(/\/+$/, "");
+  url.search = "";
+  return url;
+}
+
 export function saveCloudConfig(configPath: string, nextCloud: NonNullable<DaemonConfig["cloud"]>): DaemonConfig {
   let raw: Record<string, unknown> = {};
   try {
@@ -36,7 +64,7 @@ export function saveCloudConfig(configPath: string, nextCloud: NonNullable<Daemo
   } catch {
     raw = {};
   }
-  raw.cloud = nextCloud;
+  raw.cloud = { ...nextCloud, gateway_url: parseCloudGatewayUrl(nextCloud.gateway_url).toString() };
   mkdirSync(dirname(configPath), { recursive: true });
   writeFileSync(configPath, stringifyYaml(raw), "utf-8");
   return loadConfig(configPath);
@@ -66,4 +94,9 @@ export function redactedCloudStatus(config: DaemonConfig): Record<string, unknow
     runtime_name: cloud.runtime_name ?? null,
     ["device_" + "token"]: cloud.device_token ? "[redacted]" : null,
   };
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
 }
