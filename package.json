@@ -122,7 +122,11 @@
   "dependencies": {
     "@gsd/agent-core": "^1.0.2",
     "@gsd/agent-modes": "^1.0.2",
+    "@gsd/native": "^1.0.2",
+    "@gsd/pi-agent-core": "^1.0.2",
+    "@gsd/pi-ai": "^1.0.2",
     "@gsd/pi-coding-agent": "^1.0.2",
+    "@gsd/pi-tui": "^1.0.2",
     "@anthropic-ai/sdk": "^0.90.0",
     "@anthropic-ai/vertex-sdk": "^0.14.4",
     "@aws-sdk/client-bedrock-runtime": "^3.983.0",
@@ -156,6 +160,15 @@
     "undici": "^7.24.2",
     "yaml": "^2.8.2"
   },
+  "bundledDependencies": [
+    "@gsd/agent-core",
+    "@gsd/agent-modes",
+    "@gsd/native",
+    "@gsd/pi-agent-core",
+    "@gsd/pi-ai",
+    "@gsd/pi-coding-agent",
+    "@gsd/pi-tui"
+  ],
   "devDependencies": {
     "@types/node": "^24.12.0",
     "@types/picomatch": "^4.0.2",
