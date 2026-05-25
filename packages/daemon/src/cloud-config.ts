@@ -1,4 +1,5 @@
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { dirname } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -16,9 +17,10 @@ export async function exchangePairingCode(params: {
   runtimeName?: string;
 }): Promise<PairingExchangeResult> {
   const pairingUrl = new URL("/pairing/exchange", parseCloudGatewayUrl(params.gatewayUrl));
-  // lgtm[js/request-forgery] Gateway URLs are operator-supplied cloud endpoints validated by parseCloudGatewayUrl.
+  await validateGatewayNetworkTarget(pairingUrl);
   const response = await fetch(pairingUrl, {
     method: "POST",
+    redirect: "error",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ code: params.code, runtimeName: params.runtimeName }),
   });
@@ -111,6 +113,18 @@ function isPrivateIpHost(hostname: string): boolean {
   if (isIP(host) === 4) return isPrivateIpv4(host);
   if (isIP(host) === 6) return isPrivateIpv6(host);
   return false;
+}
+
+async function validateGatewayNetworkTarget(url: URL): Promise<void> {
+  if (url.protocol === "http:" && isLoopbackHost(url.hostname)) return;
+  if (isPrivateIpHost(url.hostname)) {
+    throw new Error("Cloud gateway URL must not target private or loopback IP addresses");
+  }
+
+  const addresses = await lookup(url.hostname, { all: true, verbatim: true });
+  if (addresses.length === 0 || addresses.some((address) => isPrivateIpHost(address.address))) {
+    throw new Error("Cloud gateway URL resolved to a private or loopback address");
+  }
 }
 
 function isPrivateIpv4(host: string): boolean {
