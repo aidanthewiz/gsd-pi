@@ -4,6 +4,7 @@
 
 import type { AgentMessage } from "@gsd/pi-agent-core";
 import type { Message } from "@gsd/pi-ai";
+import { convertToLlm } from "@gsd/pi-coding-agent/core/messages.js";
 
 // ============================================================================
 // File Operation Tracking
@@ -96,6 +97,56 @@ function truncateForSummary(text: string, maxChars: number): string {
 	if (text.length <= maxChars) return text;
 	const truncatedChars = text.length - maxChars;
 	return `${text.slice(0, maxChars)}\n\n[... ${truncatedChars} more characters truncated]`;
+}
+
+function cappedLength(text: string, maxChars: number): number {
+	return Math.min(text.length, maxChars);
+}
+
+/**
+ * Estimate the token size of a message after summary serialization.
+ *
+ * This mirrors the serializer's truncation behavior for tool results and uses
+ * the same cap for bulky direct conversation blocks when planning chunks.
+ */
+export function estimateSerializedTokens(message: AgentMessage): number {
+	if (message.role === "branchSummary" || message.role === "compactionSummary" || message.role === "toolResult") {
+		return Math.ceil(serializeConversation(convertToLlm([message])).length / 4);
+	}
+
+	let chars = 0;
+	switch (message.role) {
+		case "user":
+		case "custom": {
+			const content = message.content;
+			if (typeof content === "string") {
+				chars = cappedLength(content, TOOL_RESULT_MAX_CHARS);
+			} else {
+				for (const block of content) {
+					if (block.type === "text" && block.text) chars += cappedLength(block.text, TOOL_RESULT_MAX_CHARS);
+				}
+			}
+			break;
+		}
+		case "assistant": {
+			for (const block of message.content) {
+				if (block.type === "text") {
+					chars += cappedLength(block.text, TOOL_RESULT_MAX_CHARS);
+				} else if (block.type === "thinking") {
+					chars += cappedLength(block.thinking, TOOL_RESULT_MAX_CHARS);
+				} else if (block.type === "toolCall") {
+					chars += block.name.length + JSON.stringify(block.arguments).length;
+				}
+			}
+			break;
+		}
+		case "bashExecution": {
+			chars = cappedLength(message.command + message.output, TOOL_RESULT_MAX_CHARS);
+			break;
+		}
+	}
+
+	return Math.ceil(chars / 4);
 }
 
 /**

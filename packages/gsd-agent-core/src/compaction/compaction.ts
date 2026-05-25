@@ -18,6 +18,7 @@ import { buildSessionContext, type CompactionEntry, type SessionEntry } from "@g
 import {
 	computeFileLists,
 	createFileOps,
+	estimateSerializedTokens,
 	extractFileOpsFromMessage,
 	type FileOperations,
 	formatFileOperations,
@@ -130,11 +131,11 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 // ============================================================================
 
 /**
- * Calculate total context tokens from usage.
- * Uses the native totalTokens field when available, falls back to computing from components.
+ * Calculate prompt-side context tokens from usage.
+ * Completion/output tokens are not part of the reusable conversation context.
  */
 export function calculateContextTokens(usage: Usage): number {
-	return usage.totalTokens || usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+	return usage.input + usage.cacheRead + usage.cacheWrite;
 }
 
 /**
@@ -410,10 +411,11 @@ export function findCutPoint(
 
 	for (let i = endIndex - 1; i >= startIndex; i--) {
 		const entry = entries[i];
-		if (entry.type !== "message") continue;
+		const message = getMessageFromEntryForCompaction(entry);
+		if (!message) continue;
 
 		// Estimate this message's size
-		const messageTokens = estimateTokens(entry.message);
+		const messageTokens = estimateTokens(message);
 		accumulatedTokens += messageTokens;
 
 		// Check if we've exceeded the budget
@@ -446,7 +448,10 @@ export function findCutPoint(
 
 	// Determine if this is a split turn
 	const cutEntry = entries[cutIndex];
-	const isUserMessage = cutEntry.type === "message" && cutEntry.message.role === "user";
+	const isUserMessage =
+		(cutEntry.type === "message" && cutEntry.message.role === "user") ||
+		cutEntry.type === "branch_summary" ||
+		cutEntry.type === "custom_message";
 	const turnStartIndex = isUserMessage ? -1 : findTurnStartIndex(entries, cutIndex, startIndex);
 
 	return {
@@ -532,6 +537,61 @@ Use this EXACT format:
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.`;
 
+type SummaryCompleteFn = (
+	model: Model<any>,
+	context: Context,
+	options: SimpleStreamOptions,
+) => AssistantMessage | Promise<AssistantMessage>;
+
+export class CompactionInvalidInputError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "CompactionInvalidInputError";
+	}
+}
+
+export class CompactionProducedNoSummaryError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "CompactionProducedNoSummaryError";
+	}
+}
+
+export function isDegenerateSummary(summary: string | undefined): boolean {
+	if (summary === undefined) return false;
+	const normalized = summary.trim().toLowerCase();
+	if (normalized.length === 0 || normalized.length < 100) return true;
+	return (
+		normalized.includes("empty conversation") ||
+		normalized.includes("no conversation to summarize") ||
+		normalized.includes("nothing between the <conversation> tags")
+	);
+}
+
+export function chunkMessages(messages: AgentMessage[], maxChunkTokens: number): AgentMessage[][] {
+	const chunks: AgentMessage[][] = [];
+	let currentChunk: AgentMessage[] = [];
+	let currentTokens = 0;
+	const budget = Math.max(1, maxChunkTokens);
+
+	for (const message of messages) {
+		const messageTokens = estimateSerializedTokens(message);
+		if (currentChunk.length > 0 && currentTokens + messageTokens > budget) {
+			chunks.push(currentChunk);
+			currentChunk = [];
+			currentTokens = 0;
+		}
+		currentChunk.push(message);
+		currentTokens += messageTokens;
+	}
+
+	if (currentChunk.length > 0) {
+		chunks.push(currentChunk);
+	}
+
+	return chunks;
+}
+
 function createSummarizationOptions(
 	model: Model<any>,
 	maxTokens: number,
@@ -552,12 +612,75 @@ async function completeSummarization(
 	context: Context,
 	options: SimpleStreamOptions,
 	streamFn?: StreamFn,
+	completeFn?: SummaryCompleteFn,
 ): Promise<AssistantMessage> {
+	if (completeFn) {
+		return completeFn(model, context, options);
+	}
 	if (!streamFn) {
 		return completeSimple(model, context, options);
 	}
 	const stream = await streamFn(model, context, options);
 	return stream.result();
+}
+
+function summaryText(response: AssistantMessage): string {
+	return response.content
+		.filter((c): c is { type: "text"; text: string } => c.type === "text")
+		.map((c) => c.text)
+		.join("\n");
+}
+
+function buildSummarizationPrompt(
+	messages: AgentMessage[],
+	customInstructions: string | undefined,
+	previousSummary: string | undefined,
+): string {
+	let basePrompt = previousSummary ? UPDATE_SUMMARIZATION_PROMPT : SUMMARIZATION_PROMPT;
+	if (customInstructions) {
+		basePrompt = `${basePrompt}\n\nAdditional focus: ${customInstructions}`;
+	}
+
+	const llmMessages = convertToLlm(messages);
+	const conversationText = serializeConversation(llmMessages);
+	let promptText = `<conversation>\n${conversationText}\n</conversation>\n\n`;
+	if (previousSummary) {
+		promptText += `<previous-summary>\n${previousSummary}\n</previous-summary>\n\n`;
+	}
+	return promptText + basePrompt;
+}
+
+async function summarizeOnce(
+	messages: AgentMessage[],
+	model: Model<any>,
+	options: SimpleStreamOptions,
+	customInstructions: string | undefined,
+	previousSummary: string | undefined,
+	streamFn: StreamFn | undefined,
+	completeFn: SummaryCompleteFn | undefined,
+): Promise<string> {
+	const promptText = buildSummarizationPrompt(messages, customInstructions, previousSummary);
+	const summarizationMessages = [
+		{
+			role: "user" as const,
+			content: [{ type: "text" as const, text: promptText }],
+			timestamp: Date.now(),
+		},
+	];
+
+	const response = await completeSummarization(
+		model,
+		{ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
+		options,
+		streamFn,
+		completeFn,
+	);
+
+	if (response.stopReason === "error") {
+		throw new Error(`Summarization failed: ${response.errorMessage || "Unknown error"}`);
+	}
+
+	return summaryText(response);
 }
 
 /**
@@ -572,60 +695,78 @@ export async function generateSummary(
 	headers?: Record<string, string>,
 	signal?: AbortSignal,
 	customInstructions?: string,
-	previousSummary?: string,
-	thinkingLevel?: ThinkingLevel,
+	previousSummary?: string | SummaryCompleteFn,
+	thinkingLevel?: ThinkingLevel | SummaryCompleteFn,
 	streamFn?: StreamFn,
+	completeFn?: SummaryCompleteFn,
 ): Promise<string> {
+	if (typeof previousSummary === "function") {
+		completeFn = previousSummary as SummaryCompleteFn;
+		previousSummary = customInstructions;
+		customInstructions = undefined;
+	}
+	if (typeof thinkingLevel === "function") {
+		completeFn = thinkingLevel as SummaryCompleteFn;
+		thinkingLevel = undefined;
+	}
+
 	const maxTokens = Math.min(
 		Math.floor(0.8 * reserveTokens),
 		model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY,
 	);
-
-	// Use update prompt if we have a previous summary, otherwise initial prompt
-	let basePrompt = previousSummary ? UPDATE_SUMMARIZATION_PROMPT : SUMMARIZATION_PROMPT;
-	if (customInstructions) {
-		basePrompt = `${basePrompt}\n\nAdditional focus: ${customInstructions}`;
-	}
-
-	// Serialize conversation to text so model doesn't try to continue it
-	// Convert to LLM messages first (handles custom types like bashExecution, custom, etc.)
-	const llmMessages = convertToLlm(currentMessages);
-	const conversationText = serializeConversation(llmMessages);
-
-	// Build the prompt with conversation wrapped in tags
-	let promptText = `<conversation>\n${conversationText}\n</conversation>\n\n`;
-	if (previousSummary) {
-		promptText += `<previous-summary>\n${previousSummary}\n</previous-summary>\n\n`;
-	}
-	promptText += basePrompt;
-
-	const summarizationMessages = [
-		{
-			role: "user" as const,
-			content: [{ type: "text" as const, text: promptText }],
-			timestamp: Date.now(),
-		},
-	];
-
 	const completionOptions = createSummarizationOptions(model, maxTokens, apiKey, headers, signal, thinkingLevel);
+	const chunkBudget = Math.max(1, model.contextWindow - reserveTokens - maxTokens);
+	const chunks = chunkMessages(currentMessages, chunkBudget);
 
-	const response = await completeSummarization(
-		model,
-		{ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
-		completionOptions,
-		streamFn,
-	);
-
-	if (response.stopReason === "error") {
-		throw new Error(`Summarization failed: ${response.errorMessage || "Unknown error"}`);
+	if (chunks.length <= 1) {
+		return summarizeOnce(
+			currentMessages,
+			model,
+			completionOptions,
+			customInstructions,
+			previousSummary,
+			streamFn,
+			completeFn,
+		);
 	}
 
-	const textContent = response.content
-		.filter((c): c is { type: "text"; text: string } => c.type === "text")
-		.map((c) => c.text)
-		.join("\n");
+	let runningSummary = previousSummary;
+	for (const chunk of chunks) {
+		const summaryBeforeChunk = runningSummary;
+		let chunkSummary = await summarizeOnce(
+			chunk,
+			model,
+			completionOptions,
+			customInstructions,
+			summaryBeforeChunk,
+			streamFn,
+			completeFn,
+		);
 
-	return textContent;
+		if (isDegenerateSummary(chunkSummary)) {
+			chunkSummary = await summarizeOnce(
+				chunk,
+				model,
+				completionOptions,
+				customInstructions,
+				summaryBeforeChunk,
+				streamFn,
+				completeFn,
+			);
+		}
+
+		if (!isDegenerateSummary(chunkSummary)) {
+			runningSummary = chunkSummary;
+		}
+	}
+
+	if (runningSummary && !isDegenerateSummary(runningSummary)) {
+		return runningSummary;
+	}
+	if (previousSummary) {
+		return previousSummary;
+	}
+	throw new CompactionProducedNoSummaryError("Summarization produced no usable summary");
 }
 
 // ============================================================================
@@ -759,10 +900,20 @@ export async function compact(
 	apiKey: string | undefined,
 	headers?: Record<string, string>,
 	customInstructions?: string,
-	signal?: AbortSignal,
-	thinkingLevel?: ThinkingLevel,
+	signal?: AbortSignal | SummaryCompleteFn,
+	thinkingLevel?: ThinkingLevel | SummaryCompleteFn,
 	streamFn?: StreamFn,
+	completeFn?: SummaryCompleteFn,
 ): Promise<CompactionResult> {
+	if (typeof signal === "function") {
+		completeFn = signal as SummaryCompleteFn;
+		signal = undefined;
+	}
+	if (typeof thinkingLevel === "function") {
+		completeFn = thinkingLevel as SummaryCompleteFn;
+		thinkingLevel = undefined;
+	}
+
 	const {
 		firstKeptEntryId,
 		messagesToSummarize,
@@ -773,6 +924,10 @@ export async function compact(
 		fileOps,
 		settings,
 	} = preparation;
+
+	if (messagesToSummarize.length === 0 && (!isSplitTurn || turnPrefixMessages.length === 0)) {
+		throw new CompactionInvalidInputError("Compaction requires messages to summarize");
+	}
 
 	// Generate summaries (can be parallel if both needed) and merge into one
 	let summary: string;
@@ -792,6 +947,7 @@ export async function compact(
 						previousSummary,
 						thinkingLevel,
 						streamFn,
+						completeFn,
 					)
 				: Promise.resolve("No prior history."),
 			generateTurnPrefixSummary(
@@ -803,6 +959,7 @@ export async function compact(
 				signal,
 				thinkingLevel,
 				streamFn,
+				completeFn,
 			),
 		]);
 		// Merge into single summary
@@ -820,7 +977,12 @@ export async function compact(
 			previousSummary,
 			thinkingLevel,
 			streamFn,
+			completeFn,
 		);
+	}
+
+	if (isDegenerateSummary(summary)) {
+		throw new CompactionProducedNoSummaryError("Compaction produced no usable summary");
 	}
 
 	// Compute file lists and append to summary
@@ -851,6 +1013,7 @@ async function generateTurnPrefixSummary(
 	signal?: AbortSignal,
 	thinkingLevel?: ThinkingLevel,
 	streamFn?: StreamFn,
+	completeFn?: SummaryCompleteFn,
 ): Promise<string> {
 	const maxTokens = Math.min(
 		Math.floor(0.5 * reserveTokens),
@@ -872,14 +1035,12 @@ async function generateTurnPrefixSummary(
 		{ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
 		createSummarizationOptions(model, maxTokens, apiKey, headers, signal, thinkingLevel),
 		streamFn,
+		completeFn,
 	);
 
 	if (response.stopReason === "error") {
 		throw new Error(`Turn prefix summarization failed: ${response.errorMessage || "Unknown error"}`);
 	}
 
-	return response.content
-		.filter((c): c is { type: "text"; text: string } => c.type === "text")
-		.map((c) => c.text)
-		.join("\n");
+	return summaryText(response);
 }
