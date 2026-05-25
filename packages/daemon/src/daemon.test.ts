@@ -129,7 +129,7 @@ describe('loadConfig', () => {
     const configPath = join(dir, 'daemon.yaml');
     writeFileSync(configPath, `
 discord:
-  token: "test-token-123"
+  token: "fixture"
   guild_id: "g1"
   owner_id: "o1"
 projects:
@@ -142,7 +142,7 @@ log:
   max_size_mb: 100
 `);
     const cfg = loadConfig(configPath);
-    assert.equal(cfg.discord?.token, 'test-token-123');
+    assert.equal(cfg.discord?.token, 'fixture');
     assert.equal(cfg.discord?.guild_id, 'g1');
     assert.equal(cfg.log.level, 'debug');
     assert.equal(cfg.log.max_size_mb, 100);
@@ -232,7 +232,7 @@ describe('validateConfig', () => {
     try {
       process.env['DISCORD_BOT_TOKEN'] = 'env-override-token';
       const cfg = validateConfig({
-        discord: { token: 'file-token', guild_id: 'g1', owner_id: 'o1' },
+        discord: { token: 'fixture', guild_id: 'g1', owner_id: 'o1' },
       });
       assert.equal(cfg.discord?.token, 'env-override-token');
       assert.equal(cfg.discord?.guild_id, 'g1');

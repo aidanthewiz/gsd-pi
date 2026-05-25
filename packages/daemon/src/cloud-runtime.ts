@@ -33,12 +33,18 @@ export class CloudRuntime {
   stop(): void {
     this.stopped = true;
     if (this.reconnect) clearTimeout(this.reconnect);
+    this.reconnect = undefined;
     if (this.heartbeat) clearInterval(this.heartbeat);
+    this.heartbeat = undefined;
     this.inFlight.clear();
-    this.socket?.close();
+    const socket = this.socket;
+    this.socket = undefined;
+    socket?.close();
   }
 
   private connect(): void {
+    if (this.reconnect) clearTimeout(this.reconnect);
+    this.reconnect = undefined;
     if (!this.cloud.device_token || !this.cloud.runtime_id) {
       this.logger.warn("cloud runtime skipped — missing device token or runtime id");
       return;
@@ -58,25 +64,54 @@ export class CloudRuntime {
       headers: { Authorization: `Bearer ${this.cloud.device_token}` },
       lookup: createGatewayLookup(gatewayUrl),
     });
+    const previousSocket = this.socket;
     this.socket = socket;
+    if (previousSocket && previousSocket.readyState !== WebSocket.CLOSING && previousSocket.readyState !== WebSocket.CLOSED) {
+      previousSocket.close();
+    }
 
     socket.on("open", () => {
-      this.logger.info("cloud runtime connected", { gateway_url: this.cloud.gateway_url, runtime_id: this.cloud.runtime_id });
-      void this.advertiseProjects();
-      this.heartbeat = setInterval(() => this.send({ type: "heartbeat", at: Date.now() }), 30_000);
+      this.handleSocketOpen(socket);
     });
-    socket.on("message", (data) => void this.handleMessage(data.toString("utf8")));
+    socket.on("message", (data) => {
+      void this.handleSocketMessage(socket, data.toString("utf8"));
+    });
     socket.on("close", () => {
-      if (this.heartbeat) clearInterval(this.heartbeat);
-      this.heartbeat = undefined;
-      if (!this.stopped) {
-        this.logger.warn("cloud runtime disconnected; reconnecting");
-        this.reconnect = setTimeout(() => this.connect(), 5_000);
-      }
+      this.handleSocketClose(socket);
     });
     socket.on("error", (err) => {
-      this.logger.warn("cloud runtime socket error", { error: err.message });
+      this.handleSocketError(socket, err);
     });
+  }
+
+  private handleSocketOpen(socket: WebSocket): void {
+    if (socket !== this.socket) return;
+    this.logger.info("cloud runtime connected", { gateway_url: this.cloud.gateway_url, runtime_id: this.cloud.runtime_id });
+    void this.advertiseProjects();
+    if (this.heartbeat) clearInterval(this.heartbeat);
+    this.heartbeat = setInterval(() => this.send({ type: "heartbeat", at: Date.now() }), 30_000);
+  }
+
+  private async handleSocketMessage(socket: WebSocket, text: string): Promise<void> {
+    if (socket !== this.socket) return;
+    await this.handleMessage(text);
+  }
+
+  private handleSocketClose(socket: WebSocket): void {
+    if (socket !== this.socket) return;
+    if (this.heartbeat) clearInterval(this.heartbeat);
+    this.heartbeat = undefined;
+    this.socket = undefined;
+    if (!this.stopped) {
+      this.logger.warn("cloud runtime disconnected; reconnecting");
+      if (this.reconnect) clearTimeout(this.reconnect);
+      this.reconnect = setTimeout(() => this.connect(), 5_000);
+    }
+  }
+
+  private handleSocketError(socket: WebSocket, err: Error): void {
+    if (socket !== this.socket) return;
+    this.logger.warn("cloud runtime socket error", { error: err.message });
   }
 
   private async advertiseProjects(): Promise<void> {
