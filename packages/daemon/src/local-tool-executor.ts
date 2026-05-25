@@ -34,7 +34,7 @@ export class LocalToolExecutor {
 
   async execute(toolName: string, rawArgs: Record<string, unknown>, projectAlias?: string): Promise<unknown> {
     const args = { ...rawArgs };
-    if (projectAlias && typeof args.projectDir !== "string") {
+    if (projectAlias) {
       args.projectDir = await this.resolveProjectPath(projectAlias);
     }
 
@@ -113,7 +113,8 @@ export class LocalToolExecutor {
   private async resolveProjectPath(aliasOrPath: string): Promise<string> {
     const projects = await this.scanProjects();
     const match = projects.find((project) => project.name === aliasOrPath || project.path === aliasOrPath);
-    return match?.path ?? aliasOrPath;
+    if (!match) throw new Error(`Project is not advertised by the Local GSD Runtime: ${aliasOrPath}`);
+    return match.path;
   }
 
   private executeWorkflowHandler(handler: ToolHandler, args: Record<string, unknown>): Promise<unknown> {

@@ -6,6 +6,8 @@ import { createGatewayMcpServer } from "./mcp.js";
 import { extractBearerToken, FileAuthStore, InMemoryAuthStore } from "./auth-store.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 
+const MAX_JSON_BODY_BYTES = 1024 * 1024;
+
 export interface GatewayServerOptions {
   port?: number;
   host?: string;
@@ -123,7 +125,15 @@ function requireUser(req: IncomingMessage, auth: InMemoryAuthStore): string | nu
 
 async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  let totalBytes = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += buffer.byteLength;
+    if (totalBytes > MAX_JSON_BODY_BYTES) {
+      throw new BadRequestError("Request body too large");
+    }
+    chunks.push(buffer);
+  }
   if (chunks.length === 0) return {};
   try {
     const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;

@@ -41,6 +41,18 @@ test("gateway reports invalid JSON as a client error", async () => {
   assert.deepEqual(JSON.parse(response.body) as unknown, { error: "Invalid JSON request body" });
 });
 
+test("gateway rejects oversized JSON request bodies", async () => {
+  const { server } = createGatewayServer({ userToken: "user-token" });
+  const response = await dispatch(server, {
+    method: "POST",
+    url: "/mcp",
+    headers: { authorization: "Bearer user-token" },
+    chunks: [`{"value":"${"a".repeat(1024 * 1024)}"}`],
+  });
+  assert.equal(response.status, 400);
+  assert.deepEqual(JSON.parse(response.body) as unknown, { error: "Request body too large" });
+});
+
 test("runtime websocket rejects device tokens supplied in the URL query", () => {
   const { server, auth } = createGatewayServer({ userToken: "user-token" });
   const { code } = auth.createPairingCode("local-user");
