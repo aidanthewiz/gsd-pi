@@ -5,6 +5,7 @@ import { Loader, Markdown, Spacer, Text } from "@gsd/pi-tui";
 import type { InteractiveModeEvent, InteractiveModeStateHost } from "../interactive-mode-state.js";
 import { theme } from "../theme/theme.js";
 import { AssistantMessageComponent } from "../components/assistant-message.js";
+import { chatTurnFollowsUser } from "../components/chat-turn-connect.js";
 import {
 	ToolExecutionComponent,
 	ToolPhaseSummaryComponent,
@@ -618,12 +619,16 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 								(s) => s.kind === "text-run" && s.startIndex === seg.startIndex && s.contentType === seg.contentType,
 							);
 							if (!existing) {
+								const connectedToUser =
+									renderedSegments.filter((s) => s.kind === "text-run").length === 0 &&
+									chatTurnFollowsUser(host.chatContainer.children);
 								const comp = new AssistantMessageComponent(
 									undefined,
 									host.hideThinkingBlock,
 									host.getMarkdownThemeWithSettings(),
 									timestampFormat,
 									{ startIndex: seg.startIndex, endIndex: seg.endIndex },
+									connectedToUser,
 								);
 								host.chatContainer.addChild(comp);
 								renderedSegments.push({
@@ -828,12 +833,16 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 								continue;
 							}
 
+							const connectedToUser =
+								renderedSegments.filter((s) => s.kind === "text-run").length === 0 &&
+								chatTurnFollowsUser(host.chatContainer.children);
 							const comp = new AssistantMessageComponent(
 								undefined,
 								host.hideThinkingBlock,
 								host.getMarkdownThemeWithSettings(),
 								timestampFormat,
 								{ startIndex: seg.startIndex, endIndex: seg.endIndex },
+								connectedToUser,
 							);
 							comp.updateContent(host.streamingMessage);
 							host.chatContainer.addChild(comp);
@@ -854,6 +863,8 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 							host.hideThinkingBlock,
 							host.getMarkdownThemeWithSettings(),
 							timestampFormat,
+							undefined,
+							chatTurnFollowsUser(host.chatContainer.children),
 						);
 					host.chatContainer.addChild(host.streamingComponent);
 				}

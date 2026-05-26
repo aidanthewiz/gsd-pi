@@ -80,6 +80,8 @@
     "test:integration": "node --import ./src/resources/extensions/gsd/tests/resolve-ts.mjs --experimental-strip-types --test \"src/tests/integration/*.test.ts\" \"src/resources/extensions/gsd/tests/integration/*.test.ts\" \"src/resources/extensions/async-jobs/*.test.ts\" \"src/resources/extensions/browser-tools/tests/*.test.mjs\"",
     "pretest": "npm run typecheck:extensions",
     "test": "npm run test:unit && npm run test:integration && npm run test:packages",
+    "prototype:tui-design": "npm run build:pi-tui && npm run build:pi-coding-agent && node packages/pi-coding-agent/scripts/run-design-prototype.mjs",
+    "prototype:tui-density": "npm run prototype:tui-design",
     "test:smoke": "node --experimental-strip-types tests/smoke/run.ts",
     "test:live": "node scripts/with-env.mjs GSD_LIVE_TESTS=1 -- node --experimental-strip-types tests/live/run.ts",
     "test:browser-tools": "node --test src/resources/extensions/browser-tools/tests/browser-tools-unit.test.cjs src/resources/extensions/browser-tools/tests/browser-tools-integration.test.mjs",
