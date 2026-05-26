@@ -1064,6 +1064,59 @@ describe("agentLoop with AgentMessage", () => {
 		]);
 	});
 
+	it("should synthesize a stop message after 3 consecutive all-error tool turns", async () => {
+		const context: AgentContext = {
+			systemPrompt: "",
+			messages: [],
+			tools: [],
+		};
+
+		let llmCalls = 0;
+		const stream = agentLoop([createUserMessage("loop forever")], context, {
+			model: createModel(),
+			convertToLlm: identityConverter,
+		}, undefined, () => {
+			llmCalls++;
+			const mockStream = new MockAssistantStream();
+			queueMicrotask(() => {
+				if (llmCalls <= 3) {
+					mockStream.push({
+						type: "done",
+						reason: "toolUse",
+						message: createAssistantMessage(
+							[{ type: "toolCall", id: `tool-${llmCalls}`, name: "NoSuchTool", arguments: {} }],
+							"toolUse",
+						),
+					});
+					return;
+				}
+
+				mockStream.push({
+					type: "done",
+					reason: "stop",
+					message: createAssistantMessage([{ type: "text", text: "should not be reached" }]),
+				});
+			});
+			return mockStream;
+		});
+
+		for await (const _event of stream) {
+			// consume
+		}
+
+		const messages = await stream.result();
+		expect(llmCalls).toBe(3);
+		expect(messages.at(-1)?.role).toBe("assistant");
+		if (messages.at(-1)?.role !== "assistant") throw new Error("Expected final assistant message");
+		expect(messages.at(-1)?.stopReason).toBe("stop");
+		expect(messages.at(-1)?.content).toEqual([
+			{
+				type: "text",
+				text: "Stopped after 3 consecutive turns with all tool calls failing. Review the failing tool requests and adjust before continuing.",
+			},
+		]);
+	});
+
 	it("should stop after a tool batch when every tool result sets terminate=true", async () => {
 		const toolSchema = Type.Object({ value: Type.String() });
 		const tool: AgentTool<typeof toolSchema, { value: string }> = {
