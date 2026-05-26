@@ -219,6 +219,12 @@ function hasConflictMarkers(filePath: string): boolean {
   }
 }
 
+function gsdJsonlFilesWithConflictMarkers(basePath: string): string[] {
+  return nativeLsFiles(basePath, ".gsd/*.jsonl").filter((f) =>
+    hasConflictMarkers(join(basePath, f)),
+  );
+}
+
 /**
  * Check if two filesystem paths resolve to the same real location.
  * Returns false if either path cannot be resolved (e.g. doesn't exist).
@@ -1126,10 +1132,14 @@ export function checkoutBranchWithStashGuard(
       const gsdAlreadyExists = alreadyExists.filter((f) => f.startsWith(".gsd/"));
       const nonGsdAlreadyExists = alreadyExists.filter((f) => !f.startsWith(".gsd/"));
       const isUntrackedRestoreFailure = stashPopMessage.includes("could not restore untracked files from stash");
+      const gsdContentConflicts = isUntrackedRestoreFailure
+        ? gsdJsonlFilesWithConflictMarkers(basePath)
+        : [];
+      const gsdConflictFiles = [...new Set([...gsdAlreadyExists, ...gsdContentConflicts])];
       const ref = stashRefFromError(popErr);
 
-      if (isUntrackedRestoreFailure && gsdAlreadyExists.length > 0 && nonGsdAlreadyExists.length === 0) {
-        for (const f of gsdAlreadyExists) {
+      if (isUntrackedRestoreFailure && gsdConflictFiles.length > 0 && nonGsdAlreadyExists.length === 0) {
+        for (const f of gsdConflictFiles) {
           execFileSync("git", ["checkout", "HEAD", "--", f], {
             cwd: basePath,
             stdio: ["ignore", "pipe", "pipe"],
@@ -2285,11 +2295,7 @@ export function mergeMilestoneToMain(
       // Untracked-file restore failures can leave marker conflicts in tracked
       // .gsd JSONL files without producing `U` status entries.
       if (isUntrackedRestoreFailure) {
-        for (const f of nativeLsFiles(originalBasePath_, ".gsd/*.jsonl")) {
-          if (hasConflictMarkers(join(originalBasePath_, f))) {
-            gsdContentConflicts.push(f);
-          }
-        }
+        gsdContentConflicts.push(...gsdJsonlFilesWithConflictMarkers(originalBasePath_));
       }
       const gsdConflictFiles = [...new Set([...gsdUU, ...gsdContentConflicts])];
 
