@@ -1,4 +1,5 @@
 import { clearApiProviders, registerApiProvider } from "../api-registry.js";
+import { createFakeProvider } from "./fake.js";
 import type {
 	Api,
 	AssistantMessage,
@@ -401,6 +402,23 @@ export function registerBuiltInApiProviders(): void {
 export function resetApiProviders(): void {
 	clearApiProviders();
 	registerBuiltInApiProviders();
+	registerFakeProviderIfEnabled();
+}
+
+/**
+ * E2E-test-only: when `GSD_FAKE_LLM_TRANSCRIPT` is set, register a
+ * deterministic JSONL-replay provider under api "fake".
+ */
+function registerFakeProviderIfEnabled(): void {
+	const transcriptPath = process.env.GSD_FAKE_LLM_TRANSCRIPT;
+	if (!transcriptPath) return;
+	try {
+		registerApiProvider(createFakeProvider({ transcriptPath }), "fake");
+	} catch (err) {
+		process.stderr.write(`fake-llm: failed to register: ${(err as Error).message}\n`);
+		throw err;
+	}
 }
 
 registerBuiltInApiProviders();
+registerFakeProviderIfEnabled();

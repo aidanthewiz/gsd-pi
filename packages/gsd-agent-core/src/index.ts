@@ -32,6 +32,7 @@ export {
 	prepareCompaction,
 	serializeConversation,
 	shouldCompact,
+	truncateForSummary,
 } from "./compaction/index.js";
 export type { CompactionPreparation } from "./compaction/compaction.js";
 export { type BashResult, executeBashWithOperations } from "./bash-executor.js";

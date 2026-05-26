@@ -20,6 +20,8 @@
     "packages/gsd-agent-modes"
   ],
   "patchAllowlist": [
+    "packages/pi-ai/src/providers/fake.ts",
+    "packages/pi-ai/src/models/fake-model.ts",
     "packages/pi-ai/src/providers/google-shared.ts",
     "packages/pi-ai/src/providers/mistral.ts",
     "packages/pi-ai/src/providers/provider-capabilities.ts",
