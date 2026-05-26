@@ -33,7 +33,6 @@ function fixFile(file) {
   const orig = c
 
   // toolspath-utils typo
-  c = c.replace(/tools\/path-utils\.js/g, 'tools/path-utils.js')
 
   // Replace any relative core/ import
   c = c.replace(/from "(?:\.\.\/)+core\/([^"]+)"/g, (m, subpath) => {

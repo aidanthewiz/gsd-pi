@@ -1,5 +1,6 @@
 import { execFile, spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
 import type { Readable } from "node:stream";
 import { isAbsolute, relative, resolve } from "node:path";
@@ -463,7 +464,31 @@ function getSafeReadableDirectory(pathValue: string): string | null {
 
   try {
     const resolved = resolve(trimmed);
+    const allowedRoots = [resolve(homedir()), resolve(process.cwd()), resolve(tmpdir())]
+      .flatMap((root) => {
+        try {
+          return [root, realpathSync(root)];
+        } catch {
+          return [root];
+        }
+      });
+    const isWithinAllowedRoot = allowedRoots.some((root) => {
+      const rel = relative(root, resolved);
+      return rel === "" || (rel !== ".." && !rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) && !isAbsolute(rel));
+    });
+    if (!isWithinAllowedRoot) {
+      return null;
+    }
+
     const canonical = realpathSync(resolved);
+    const canonicalWithinAllowedRoot = allowedRoots.some((root) => {
+      const rel = relative(root, canonical);
+      return rel === "" || (rel !== ".." && !rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) && !isAbsolute(rel));
+    });
+    if (!canonicalWithinAllowedRoot) {
+      return null;
+    }
+
     const stats = statSync(canonical);
     return stats.isDirectory() ? canonical : null;
   } catch {
