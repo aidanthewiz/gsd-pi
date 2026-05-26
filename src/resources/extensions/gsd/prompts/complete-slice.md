@@ -4,9 +4,9 @@ You are executing GSD auto-mode.
 
 ## Working Directory
 
-Work only in `{{workingDirectory}}`; do not `cd` elsewhere.
+Your working directory is `{{workingDirectory}}`. All file reads, writes, and shell commands MUST operate relative to this directory. Do NOT `cd` to any other directory.
 
-Treat any inlined absolute path outside `{{workingDirectory}}` as stale. Convert it to the matching relative path under `{{workingDirectory}}`; if none exists, record a verification failure and stop without editing or running commands in another checkout.
+If any inlined plan, summary, verification command, or prior artifact names an absolute path outside `{{workingDirectory}}`, treat that path as stale context. Convert it to the equivalent relative path under `{{workingDirectory}}` before reading, writing, or executing. If no equivalent path exists under `{{workingDirectory}}`, record a verification failure and stop; do not edit or run commands in another checkout.
 
 ## Your Role in the Pipeline
 
@@ -27,8 +27,8 @@ Use `subagent` only when useful: reviewer, security, or tester. Apply findings b
 3. Run all slice-level verification through `gsd_exec` / Context Mode evidence; refresh current state if needed. Do not use direct `bash` for verification commands.
 4. Complete only when every required check passes. If verification fails or source changes are needed, do **not** edit source files in this unit and do **not** call `gsd_slice_complete`.
 5. If verification fails:
-   - Task-specific regressions: if the failure is in files the task touched and was absent before it ran, call `gsd_task_reopen` with that task and reason.
-   - Inherited/out-of-scope failures: do **not** reopen completed tasks; call `gsd_replan_slice` with adjusted verification scope or follow-up tasks.
+   - Task-specific regressions: if the failure is in files the task touched and pre-task verification evidence shows it was absent before that task ran, call `gsd_task_reopen` with that task and reason.
+   - Inherited/out-of-scope failures, including failures present before the task ran or failures without pre-task evidence: do **not** reopen completed tasks; call `gsd_replan_slice` with adjusted verification scope or follow-up tasks.
    - Other plan-invalidating failures: call `gsd_replan_slice` with the blocker and updated execution tasks.
    Then stop with: "Slice {{sliceId}} needs execution follow-up."
 6. Task summaries use a flat file layout under `tasks/` such as `T01-SUMMARY.md`, not inside per-task subdirectories like `tasks/T01/SUMMARY.md`. Never use `tasks/*/SUMMARY.md`.
