@@ -23,7 +23,6 @@ export class UserMessageComponent extends Container {
 	private timestamp: number | undefined;
 	private timestampFormat: TimestampFormat;
 	private continuesToAssistant = false;
-	private followsAssistant = false;
 	private renderCache = new RenderCache();
 	private renderVersion = 0;
 
@@ -45,16 +44,9 @@ export class UserMessageComponent extends Container {
 		this.clearRenderCache();
 	}
 
-	setFollowsAssistant(value: boolean): void {
-		if (this.followsAssistant === value) return;
-		this.followsAssistant = value;
-		this.clearRenderCache();
-	}
-
 	override render(width: number): string[] {
 		const emitOsc133Zones = shouldEmitOsc133Zones();
-		const cacheKey =
-			`${width}:${this.renderVersion}:${emitOsc133Zones ? 1 : 0}:${this.followsAssistant ? 1 : 0}:${this.continuesToAssistant ? 1 : 0}`;
+		const cacheKey = `${width}:${this.renderVersion}:${emitOsc133Zones ? 1 : 0}:${this.continuesToAssistant ? 1 : 0}`;
 		const cached = this.renderCache.get(cacheKey);
 		if (cached) return cached;
 

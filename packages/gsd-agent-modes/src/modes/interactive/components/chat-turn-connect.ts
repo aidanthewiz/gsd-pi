@@ -7,7 +7,7 @@ import { ToolExecutionComponent, ToolPhaseSummaryComponent } from "./tool-execut
 import { UserMessageComponent } from "./user-message.js";
 
 type ChatTurnComponent = UserMessageComponent | AssistantMessageComponent;
-type UserTurnConnection = { continuesToAssistant: boolean; followsAssistant: boolean };
+type UserTurnConnection = { continuesToAssistant: boolean };
 type AssistantTurnConnection = { continuesToUser: boolean; connectedToUser: boolean };
 
 function isChatTurnComponent(child: unknown): child is ChatTurnComponent {
@@ -38,7 +38,7 @@ export function reconcileChatTurnConnections(children: readonly unknown[]): void
 		}
 
 		if (child instanceof UserMessageComponent) {
-			userConnections.set(child, { continuesToAssistant: false, followsAssistant: false });
+			userConnections.set(child, { continuesToAssistant: false });
 		} else {
 			assistantConnections.set(child, { continuesToUser: false, connectedToUser: false });
 		}
@@ -48,7 +48,6 @@ export function reconcileChatTurnConnections(children: readonly unknown[]): void
 			assistantConnections.get(child)!.connectedToUser = true;
 		} else if (previousTurn instanceof AssistantMessageComponent && child instanceof UserMessageComponent) {
 			assistantConnections.get(previousTurn)!.continuesToUser = true;
-			userConnections.get(child)!.followsAssistant = true;
 		}
 
 		previousTurn = child;
@@ -56,7 +55,6 @@ export function reconcileChatTurnConnections(children: readonly unknown[]): void
 
 	for (const [child, connection] of userConnections) {
 		child.setContinuesToAssistant(connection.continuesToAssistant);
-		child.setFollowsAssistant(connection.followsAssistant);
 	}
 	for (const [child, connection] of assistantConnections) {
 		child.setContinuesToUser(connection.continuesToUser);
