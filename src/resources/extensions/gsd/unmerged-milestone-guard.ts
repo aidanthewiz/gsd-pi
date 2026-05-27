@@ -28,6 +28,7 @@ const BLOCKED_COMMANDS = new Set([
   "next",
   "start",
   "new-milestone",
+  "new-project",
   "do",
 ]);
 
