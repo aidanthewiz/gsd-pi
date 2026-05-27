@@ -35,7 +35,7 @@ jobs:
   # docs-check, and lint jobs so build can start as soon as this finishes.
   fast-gates:
     name: fast-gates
-    timeout-minutes: 8
+    timeout-minutes: 15
     runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       heavy-code-changed: ${{ steps.classify.outputs.heavy-code-changed }}
