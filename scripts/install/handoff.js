@@ -50,7 +50,6 @@ export async function promptLaunch({ bin, clack: p, nonInteractive }) {
 
   const result = spawnSync(bin, [], {
     stdio: 'inherit',
-    timeout: 600_000,
   })
 
   if (result.error || (result.status != null && result.status !== 0)) {
