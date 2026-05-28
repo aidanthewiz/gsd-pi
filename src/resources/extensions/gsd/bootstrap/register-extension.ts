@@ -29,7 +29,7 @@ export { writeCrashLog } from "./crash-log.js";
 
 function isPipeClosedError(err: Error): boolean {
   const errno = (err as NodeJS.ErrnoException).code;
-  if (errno === "EPIPE" || errno === "ECONNRESET") return true;
+  if (errno === "EPIPE") return true;
   const message = err.message;
   return message === "write EOF" || message === "read EOF";
 }

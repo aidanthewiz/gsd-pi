@@ -94,6 +94,16 @@ test("handleRecoverableExtensionProcessError leaves unrelated errors unhandled",
   assert.equal(handled, false);
 });
 
+test("handleRecoverableExtensionProcessError leaves ECONNRESET network errors unhandled", () => {
+  const handled = handleRecoverableExtensionProcessError(
+    Object.assign(new Error("socket hang up"), {
+      code: "ECONNRESET",
+      syscall: "read",
+    }),
+  );
+  assert.equal(handled, false);
+});
+
 test("handleRecoverableExtensionProcessError swallows EPIPE without writing a crash log", () => {
   const tmpHome = join(tmpdir(), `gsd-epipe-test-${randomUUID()}`);
   const origHome = process.env.GSD_HOME;
