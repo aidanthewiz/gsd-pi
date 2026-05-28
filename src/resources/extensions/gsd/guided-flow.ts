@@ -766,12 +766,30 @@ export function checkAutoStartAfterDiscuss(lookupBasePath?: string): boolean {
         // (likely blocked by the depth-verification gate re-firing on post-verification
         // text). Auto-register as "queued" so Gate 1b can pick it up and retry
         // gsd_plan_milestone on the next checkAutoStartAfterDiscuss call.
-        logWarning("guided", `R3b: ${milestoneId} has CONTEXT.md but no DB row — inserting placeholder "queued" row for Gate 1b recovery`);
+        if (entry.r3bRecoveryCount >= MAX_PLAN_BLOCKED_RECOVERIES) {
+          logWarning(
+            "guided",
+            `R3b: milestone ${milestoneId} DB-row recovery limit reached ` +
+            `(${entry.r3bRecoveryCount}/${MAX_PLAN_BLOCKED_RECOVERIES}); escalating to user`,
+          );
+          ctx.ui.notify(
+            `Milestone ${milestoneId}: DB row recovery failed ${entry.r3bRecoveryCount} times. ` +
+            `Re-run /gsd to reset the recovery counter, or run /gsd-debug to diagnose without resetting.`,
+            "error",
+          );
+          return false;
+        }
+        logWarning(
+          "guided",
+          `R3b: ${milestoneId} has CONTEXT.md but no DB row — inserting placeholder "queued" row ` +
+          `for Gate 1b recovery (attempt ${entry.r3bRecoveryCount + 1}/${MAX_PLAN_BLOCKED_RECOVERIES})`,
+        );
         try {
           insertMilestone({ id: milestoneId, title: milestoneId, status: "queued" });
         } catch (e) {
           logWarning("guided", `R3b: insertMilestone failed: ${(e as Error).message}`);
         }
+        entry.r3bRecoveryCount += 1;
         ctx.ui.notify(
           `Milestone ${milestoneId}: context file exists but DB row was missing — recovering. Retrying gsd_plan_milestone.`,
           "warning",
