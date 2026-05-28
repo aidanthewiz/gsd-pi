@@ -25,6 +25,18 @@ function getNpmCommand() {
   return process.platform === 'win32' ? 'npm.cmd' : 'npm';
 }
 
+function cleanNpmEnv(extra = {}) {
+  const env = { ...process.env, ...extra };
+  for (const key of Object.keys(env)) {
+    if (!key.startsWith('npm_config_')) continue;
+    const setting = key.slice('npm_config_'.length).replace(/_/g, '-');
+    if (setting === 'verify-deps-before-run' || setting === 'auto-install-peers' || setting === '_jsr-registry') {
+      delete env[key];
+    }
+  }
+  return env;
+}
+
 function runNpm(args, options = {}) {
   return execFileSync(getNpmCommand(), args, {
     cwd: ROOT,
@@ -32,10 +44,9 @@ function runNpm(args, options = {}) {
     shell: process.platform === 'win32',
     stdio: ['pipe', 'pipe', 'pipe'],
     maxBuffer: DEFAULT_MAX_BUFFER,
-    env: {
-      ...process.env,
+    env: cleanNpmEnv({
       npm_config_cache: npmCacheDir ?? process.env.npm_config_cache,
-    },
+    }),
     ...options,
   });
 }
@@ -44,6 +55,22 @@ function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function resolveBundledDepPkgJson(packageRoot, nodeModulesRoot, dep) {
+  const segments = dep.startsWith('@') ? dep.split('/') : [dep];
+  const candidates = [
+    join(packageRoot, 'node_modules', ...segments, 'package.json'),
+    join(nodeModulesRoot, ...segments, 'package.json'),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  try {
+    return createRequire(join(packageRoot, 'package.json')).resolve(`${dep}/package.json`);
+  } catch {
+    return null;
+  }
 }
 
 try {
@@ -154,6 +181,10 @@ try {
     cwd: ROOT,
     stdio: 'inherit',
   });
+  execFileSync(process.execPath, [join(__dirname, 'materialize-bundled-deps.cjs')], {
+    cwd: ROOT,
+    stdio: 'inherit',
+  });
 
   console.log('==> Packing tarball...');
   const packOutput = runNpm(['pack', '--json', '--ignore-scripts']);
@@ -206,6 +237,16 @@ try {
     }
   }
 
+  for (const dep of rootPkg.bundledDependencies || []) {
+    if (dep.startsWith('@gsd/')) continue;
+    const segments = dep.startsWith('@') ? dep.split('/') : [dep];
+    const bundledPath = join('node_modules', ...segments, 'package.json');
+    if (!packedFiles.has(bundledPath)) {
+      console.log(`    MISSING bundled dependency: ${bundledPath}`);
+      missing = true;
+    }
+  }
+
   if (missing) {
     console.log('ERROR: Critical files missing from tarball.');
     process.exit(1);
@@ -224,10 +265,9 @@ try {
       shell: process.platform === 'win32',
       stdio: ['pipe', 'pipe', 'pipe'],
       maxBuffer: DEFAULT_MAX_BUFFER,
-      env: {
-        ...process.env,
+      env: cleanNpmEnv({
         npm_config_cache: npmCacheDir,
-      },
+      }),
     });
     console.log(installOutput);
     console.log('==> Install succeeded.');
@@ -400,20 +440,24 @@ try {
   const globalPrefix = mkdtempSync(join(tmpdir(), 'validate-pack-global-'));
   try {
     execFileSync(getNpmCommand(), ['install', '-g', tarball, '--ignore-scripts', '--prefix', globalPrefix], {
+      cwd: installDir,
       encoding: 'utf8',
       shell: process.platform === 'win32',
       stdio: ['pipe', 'pipe', 'pipe'],
       maxBuffer: DEFAULT_MAX_BUFFER,
-      env: {
-        ...process.env,
+      env: cleanNpmEnv({
         npm_config_cache: npmCacheDir,
-      },
+      }),
     });
     const globalNodeModules = execFileSync(getNpmCommand(), ['root', '-g', '--prefix', globalPrefix], {
+      cwd: installDir,
       encoding: 'utf8',
       shell: process.platform === 'win32',
       stdio: ['pipe', 'pipe', 'pipe'],
       maxBuffer: DEFAULT_MAX_BUFFER,
+      env: cleanNpmEnv({
+        npm_config_cache: npmCacheDir,
+      }),
     }).trim();
     const globalRoot = join(globalNodeModules, '@opengsd', 'gsd-pi');
 
@@ -426,11 +470,10 @@ try {
       'yaml',
     ];
     for (const dep of bundledExternalDeps) {
-      const segments = dep.startsWith('@') ? dep.split('/') : [dep];
-      const pkgJsonPath = join(globalRoot, 'node_modules', ...segments, 'package.json');
-      if (!existsSync(pkgJsonPath)) {
+      const pkgJsonPath = resolveBundledDepPkgJson(globalRoot, globalNodeModules, dep);
+      if (!pkgJsonPath) {
         console.log(`ERROR: Global --ignore-scripts install left bundled dep unresolved: ${dep}`);
-        console.log(`    Expected: ${pkgJsonPath}`);
+        console.log(`    Checked nested and hoisted node_modules under ${globalRoot}`);
         process.exit(1);
       }
     }
@@ -443,17 +486,16 @@ try {
       timeout: 30000,
       maxBuffer: DEFAULT_MAX_BUFFER,
     });
-    execFileSync(getNpmCommand(), ['install', '--ignore-scripts'], {
+    // Repair only the non-bundled runtime dep needed by bundled @gsd/pi-ai.
+    execFileSync(getNpmCommand(), ['install', 'openai', '--ignore-scripts', '--no-save'], {
       cwd: globalRoot,
       encoding: 'utf8',
       shell: process.platform === 'win32',
       stdio: ['pipe', 'pipe', 'pipe'],
       maxBuffer: DEFAULT_MAX_BUFFER,
-      env: {
-        ...process.env,
+      env: cleanNpmEnv({
         npm_config_cache: npmCacheDir,
-        NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --max-old-space-size=8192`.trim(),
-      },
+      }),
     });
 
     const globalOpenaiIndex = join(globalRoot, 'node_modules', 'openai', 'index.js');
