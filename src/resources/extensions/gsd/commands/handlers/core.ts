@@ -522,7 +522,7 @@ export async function handleCoreCommand(
   }
   if (trimmed === "context" || trimmed.startsWith("context ")) {
     const { handleContext } = await import("../../commands-context.js");
-    await handleContext(trimmed.replace(/^context\s*/, "").trim(), ctx);
+    await handleContext(trimmed.replace(/^context\s*/, "").trim(), ctx, projectRoot());
     return true;
   }
   if (trimmed === "show-config") {

@@ -1,10 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   analyzeSessionContext,
   buildContextBreakdown,
   formatContextReport,
+  handleContext,
   parseSystemPromptSections,
 } from "../commands-context.ts";
 
@@ -128,4 +132,50 @@ test("buildContextBreakdown supports --json shape via handleContext data", () =>
     avoid: [],
   });
   assert.equal(report.subagentSpawns, 0);
+});
+
+test("handleContext writes open reports under the command project root", async () => {
+  const intendedProject = mkdtempSync(join(tmpdir(), "gsd-context-project-"));
+  const processProject = mkdtempSync(join(tmpdir(), "gsd-context-cwd-"));
+  for (const dir of [intendedProject, processProject]) {
+    mkdirSync(join(dir, ".gsd"), { recursive: true });
+    writeFileSync(join(dir, ".gsd", "PREFERENCES.md"), "");
+  }
+
+  const originalCwd = process.cwd();
+  const originalPath = process.env.PATH;
+  process.chdir(processProject);
+  try {
+    const binDir = mkdtempSync(join(tmpdir(), "gsd-context-bin-"));
+    const xdgOpen = join(binDir, "xdg-open");
+    writeFileSync(xdgOpen, "#!/bin/sh\nexit 0\n");
+    chmodSync(xdgOpen, 0o755);
+    process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+
+    const notifications: string[] = [];
+    const ctx = {
+      model: undefined,
+      getContextUsage: () => undefined,
+      getSystemPrompt: () => "",
+      hasUI: false,
+      sessionManager: { getEntries: () => [] },
+      ui: {
+        notify: (message: string) => notifications.push(message),
+      },
+    } as any;
+
+    await handleContext("--open", ctx, intendedProject);
+
+    assert.ok(existsSync(join(intendedProject, ".gsd", "reports")));
+    assert.equal(
+      existsSync(join(processProject, ".gsd", "reports")),
+      false,
+      "must not write reports under process.cwd() when command cwd differs",
+    );
+    assert.ok(readdirSync(join(intendedProject, ".gsd", "reports")).some((name) => /^context-.*\.html$/.test(name)));
+    assert.match(notifications[0] ?? "", new RegExp(intendedProject.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    process.env.PATH = originalPath;
+    process.chdir(originalCwd);
+  }
 });

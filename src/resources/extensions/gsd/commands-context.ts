@@ -489,7 +489,7 @@ export function formatContextReport(report: ContextBreakdownReport): string {
   return lines.join("\n");
 }
 
-export async function handleContext(args: string, ctx: ExtensionCommandContext): Promise<void> {
+export async function handleContext(args: string, ctx: ExtensionCommandContext, basePath = process.cwd()): Promise<void> {
   const model = ctx.model;
   const modelLabel = model ? `${model.provider}/${model.id}` : null;
   const provider = resolveProvider(model?.provider);
@@ -511,7 +511,7 @@ export async function handleContext(args: string, ctx: ExtensionCommandContext):
   }
 
   if (args.includes("--open")) {
-    const outPath = writeContextChartHtml(process.cwd(), report);
+    const outPath = writeContextChartHtml(basePath, report);
     openInBrowser(outPath);
     ctx.ui.notify(`Context chart saved: ${outPath}`, "info");
     return;
