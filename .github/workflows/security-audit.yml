@@ -4,8 +4,6 @@ on:
   pull_request:
     paths:
       - "pnpm-lock.yaml"
-      - "package-lock.json"
-      - "web/package-lock.json"
       - "vscode-extension/package-lock.json"
       - "native/Cargo.lock"
   schedule:
@@ -25,7 +23,7 @@ concurrency:
 
 jobs:
   npm-audit:
-    name: npm audit (${{ matrix.workspace }})
+    name: dependency audit (${{ matrix.workspace }})
     runs-on: blacksmith-4vcpu-ubuntu-2404
     strategy:
       fail-fast: false
@@ -33,10 +31,13 @@ jobs:
         include:
           - workspace: "."
             artifact: "root"
+            audit_command: "pnpm audit --json --prod"
           - workspace: "web"
             artifact: "web"
+            audit_command: "pnpm audit --json --prod"
           - workspace: "vscode-extension"
             artifact: "vscode-extension"
+            audit_command: "npm audit --json --omit=dev"
     steps:
       - uses: actions/checkout@v6
 
@@ -44,10 +45,13 @@ jobs:
         with:
           node-version: "24"
 
-      - name: npm audit
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: dependency audit
         working-directory: ${{ matrix.workspace }}
         run: |
-          npm audit --json --omit=dev > npm-audit.json || true
+          ${{ matrix.audit_command }} > dependency-audit.json || true
 
           node <<'NODE'
           const fs = require("fs");
@@ -59,7 +63,7 @@ jobs:
             : severityOrder.indexOf("high");
           const blocking = process.env.SECURITY_AUDIT_BLOCKING === "true";
 
-          const audit = JSON.parse(fs.readFileSync("npm-audit.json", "utf8") || "{}");
+          const audit = JSON.parse(fs.readFileSync("dependency-audit.json", "utf8") || "{}");
           const counts = { info: 0, low: 0, moderate: 0, high: 0, critical: 0 };
 
           if (audit.metadata?.vulnerabilities) {
@@ -78,7 +82,7 @@ jobs:
             .reduce((total, severity) => total + counts[severity], 0);
 
           const summary = [
-            "# npm audit summary",
+            "# dependency audit summary",
             "",
             `Workspace: ${process.cwd()}`,
             `Blocking: ${blocking}`,
@@ -91,7 +95,7 @@ jobs:
             "",
           ].join("\n");
 
-          fs.writeFileSync("npm-audit-summary.md", summary);
+          fs.writeFileSync("dependency-audit-summary.md", summary);
           if (process.env.GITHUB_STEP_SUMMARY) {
             fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary}\n`);
           }
@@ -101,14 +105,14 @@ jobs:
           }
           NODE
 
-      - name: Upload npm audit results
+      - name: Upload dependency audit results
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: npm-audit-${{ matrix.artifact }}
+          name: dependency-audit-${{ matrix.artifact }}
           path: |
-            ${{ matrix.workspace }}/npm-audit.json
-            ${{ matrix.workspace }}/npm-audit-summary.md
+            ${{ matrix.workspace }}/dependency-audit.json
+            ${{ matrix.workspace }}/dependency-audit-summary.md
 
   cargo-audit:
     name: cargo audit
