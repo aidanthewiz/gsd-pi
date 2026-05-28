@@ -73,6 +73,11 @@ function resolveBundledDepPkgJson(packageRoot, nodeModulesRoot, dep) {
   }
 }
 
+function resolveDependencyDir(packageRoot, nodeModulesRoot, dep) {
+  const pkgJsonPath = resolveBundledDepPkgJson(packageRoot, nodeModulesRoot, dep);
+  return pkgJsonPath ? dirname(pkgJsonPath) : null;
+}
+
 try {
   npmCacheDir = mkdtempSync(join(tmpdir(), 'validate-pack-npm-cache-'));
   mkdirSync(npmCacheDir, { recursive: true });
@@ -488,17 +493,18 @@ try {
     });
     // Seed openai from the local tarball install instead of npm install in the
     // global package tree, which OOMs resolving the full dependency graph.
-    const localOpenaiDir = join(installedRoot, 'node_modules', 'openai');
+    const localNodeModules = join(installDir, 'node_modules');
+    const localOpenaiDir = resolveDependencyDir(installedRoot, localNodeModules, 'openai');
     const globalOpenaiDir = join(globalRoot, 'node_modules', 'openai');
-    if (!existsSync(join(globalOpenaiDir, 'index.js')) && existsSync(join(localOpenaiDir, 'index.js'))) {
+    if (!existsSync(join(globalOpenaiDir, 'index.js')) && localOpenaiDir && existsSync(join(localOpenaiDir, 'index.js'))) {
       mkdirSync(join(globalRoot, 'node_modules'), { recursive: true });
       cpSync(localOpenaiDir, globalOpenaiDir, { recursive: true });
     }
 
-    const globalOpenaiIndex = join(globalRoot, 'node_modules', 'openai', 'index.js');
-    if (!existsSync(globalOpenaiIndex)) {
+    const globalOpenaiIndex = resolveBundledDepPkgJson(globalRoot, globalNodeModules, 'openai');
+    if (!globalOpenaiIndex) {
       console.log('ERROR: Global install left node_modules/openai unresolved after repair.');
-      console.log(`    Expected: ${globalOpenaiIndex}`);
+      console.log(`    Checked nested and hoisted node_modules under ${globalRoot}`);
       process.exit(1);
     }
 
