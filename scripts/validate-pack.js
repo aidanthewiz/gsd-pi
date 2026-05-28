@@ -505,15 +505,10 @@ try {
     // Seed runtime deps from the local tarball install instead of npm install in
     // the global package tree, which OOMs resolving the full dependency graph.
     const localNodeModules = join(installDir, 'node_modules');
-    const globalRuntimeSeedDeps = [
-      'openai',
-      'balanced-match',
-      'brace-expansion',
-      'graceful-fs',
-      'retry',
-      'signal-exit',
-    ];
-    for (const dep of globalRuntimeSeedDeps) {
+    for (const dep of Object.keys(rootPkg.dependencies || {})) {
+      if (dep.startsWith('@gsd/') || dep.startsWith('@opengsd/') || dep.startsWith('@earendil-works/')) {
+        continue;
+      }
       seedGlobalDependencyFromLocal(globalRoot, globalNodeModules, installedRoot, localNodeModules, dep);
     }
 
