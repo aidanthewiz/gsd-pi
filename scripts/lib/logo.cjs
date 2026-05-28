@@ -3,12 +3,23 @@
 const { existsSync } = require('fs')
 const { join } = require('path')
 
-const distLogo = join(__dirname, '..', '..', 'dist', 'logo.js')
-
-if (!existsSync(distLogo)) {
-  throw new Error(
-    'dist/logo.js not found — run npm run build before using scripts/lib/logo.cjs',
-  )
+/** Install-time fallback — mirrors src/resources/shared/gsd-pi-logo.ts */
+const fallback = {
+  GSD_PI_BRAND: 'GSD-Pi',
+  GSD_WEBSITE: 'https://opengsd.net',
+  GSD_PI_LOGO: [
+    '  ██████╗ ███████╗██████╗  ─  ██╗',
+    ' ██╔════╝ ██╔════╝██╔══██╗    ██║',
+    ' ██║  ███╗███████╗██║  ██║    ██║',
+    ' ██║   ██║╚════██║██║  ██║    ██║',
+    ' ╚██████╔╝███████║██████╔╝    ██║',
+    '  ╚═════╝ ╚══════╝╚═════╝     ╚═╝',
+  ],
+  renderGsdPiLogo(color) {
+    return '\n' + this.GSD_PI_LOGO.map(color).join('\n') + '\n'
+  },
 }
 
-module.exports = require(distLogo)
+const distLogo = join(__dirname, '..', '..', 'dist', 'logo.js')
+
+module.exports = existsSync(distLogo) ? require(distLogo) : fallback
