@@ -85,7 +85,7 @@ function seedGlobalDependencyFromLocal(globalRoot, globalNodeModules, localPacka
   const segments = dep.startsWith('@') ? dep.split('/') : [dep];
   const target = join(globalRoot, 'node_modules', ...segments);
   mkdirSync(dirname(target), { recursive: true });
-  cpSync(localDir, target, { recursive: true });
+  cpSync(localDir, target, { recursive: true, dereference: true });
   return true;
 }
 
