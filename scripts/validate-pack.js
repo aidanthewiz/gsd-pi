@@ -4,7 +4,7 @@
 // Exit 0 = safe to publish, Exit 1 = broken package.
 
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
@@ -486,17 +486,14 @@ try {
       timeout: 30000,
       maxBuffer: DEFAULT_MAX_BUFFER,
     });
-    // Repair only the non-bundled runtime dep needed by bundled @gsd/pi-ai.
-    execFileSync(getNpmCommand(), ['install', 'openai', '--ignore-scripts', '--no-save'], {
-      cwd: globalRoot,
-      encoding: 'utf8',
-      shell: process.platform === 'win32',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      maxBuffer: DEFAULT_MAX_BUFFER,
-      env: cleanNpmEnv({
-        npm_config_cache: npmCacheDir,
-      }),
-    });
+    // Seed openai from the local tarball install instead of npm install in the
+    // global package tree, which OOMs resolving the full dependency graph.
+    const localOpenaiDir = join(installedRoot, 'node_modules', 'openai');
+    const globalOpenaiDir = join(globalRoot, 'node_modules', 'openai');
+    if (!existsSync(join(globalOpenaiDir, 'index.js')) && existsSync(join(localOpenaiDir, 'index.js'))) {
+      mkdirSync(join(globalRoot, 'node_modules'), { recursive: true });
+      cpSync(localOpenaiDir, globalOpenaiDir, { recursive: true });
+    }
 
     const globalOpenaiIndex = join(globalRoot, 'node_modules', 'openai', 'index.js');
     if (!existsSync(globalOpenaiIndex)) {
