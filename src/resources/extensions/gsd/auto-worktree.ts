@@ -1134,14 +1134,18 @@ export function checkoutBranchWithStashGuard(
       const isUntrackedRestoreFailure = stashPopMessage.includes("could not restore untracked files from stash");
       const stashRefForDrop = stashRefFromError(popErr);
       const nonGsdUnmerged = nativeConflictFiles(basePath).filter((f) => !f.startsWith(".gsd/"));
+      const gsdContentConflicts = isUntrackedRestoreFailure
+        ? gsdJsonlFilesWithConflictMarkers(basePath)
+        : [];
+      const gsdConflictFiles = [...new Set([...gsdAlreadyExists, ...gsdContentConflicts])];
 
       if (
         isUntrackedRestoreFailure &&
-        gsdAlreadyExists.length > 0 &&
+        gsdConflictFiles.length > 0 &&
         nonGsdAlreadyExists.length === 0 &&
         nonGsdUnmerged.length === 0
       ) {
-        for (const f of gsdAlreadyExists) {
+        for (const f of gsdConflictFiles) {
           execFileSync("git", ["checkout", "HEAD", "--", f], {
             cwd: basePath,
             stdio: ["ignore", "pipe", "pipe"],
@@ -1166,35 +1170,6 @@ export function checkoutBranchWithStashGuard(
         return;
       }
 
-      const gsdContentConflicts = isUntrackedRestoreFailure
-        ? gsdJsonlFilesWithConflictMarkers(basePath)
-        : [];
-      const gsdConflictFiles = [...new Set([...gsdAlreadyExists, ...gsdContentConflicts])];
-
-      if (isUntrackedRestoreFailure && gsdConflictFiles.length > 0 && nonGsdAlreadyExists.length === 0) {
-        for (const f of gsdConflictFiles) {
-          execFileSync("git", ["checkout", "HEAD", "--", f], {
-            cwd: basePath,
-            stdio: ["ignore", "pipe", "pipe"],
-            encoding: "utf-8",
-          });
-          nativeAddPaths(basePath, [f]);
-        }
-        if (stashRefForDrop) {
-          try {
-            execFileSync("git", ["stash", "drop", stashRefForDrop], {
-              cwd: basePath,
-              stdio: ["ignore", "pipe", "pipe"],
-              encoding: "utf-8",
-            });
-          } catch (dropErr) {
-            logWarning("worktree", `git stash drop failed: ${dropErr instanceof Error ? dropErr.message : String(dropErr)}`);
-          }
-        } else {
-          logWarning("worktree", "recorded stash entry could not be resolved; skipping automatic drop");
-        }
-        return;
-      }
       const wrapped = new Error(
         `checkout to '${branch}' succeeded but stash restore failed; working tree changes remain in the stash list. Original error: ${msg}`,
       );
