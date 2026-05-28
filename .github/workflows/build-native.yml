@@ -292,7 +292,7 @@ jobs:
         if: github.event_name != 'workflow_dispatch' || github.event.inputs.platform_packages_only != 'true'
         run: |
           pnpm install --lockfile-only
-          pnpm install --frozen-lockfile --omit=optional
+          pnpm install --frozen-lockfile --no-optional
 
       - name: Build
         if: github.event_name != 'workflow_dispatch' || github.event.inputs.platform_packages_only != 'true'
