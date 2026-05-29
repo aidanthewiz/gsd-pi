@@ -103,21 +103,21 @@ test("prefers canonical project PREFERENCES.md over legacy lowercase preferences
     const hooksDir = join(src, ".gsd", "hooks");
     mkdirSync(hooksDir, { recursive: true });
     writeFileSync(
-      join(src, ".gsd", "PREFERENCES.md"),
-      [
-        "---",
-        "git:",
-        `  worktree_post_create: ${hookPath(".gsd/hooks/canonical")}`,
-        "---",
-        "",
-      ].join("\n"),
-    );
-    writeFileSync(
       join(src, ".gsd", "preferences.md"),
       [
         "---",
         "git:",
         `  worktree_post_create: ${hookPath(".gsd/hooks/legacy")}`,
+        "---",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(src, ".gsd", "PREFERENCES.md"),
+      [
+        "---",
+        "git:",
+        `  worktree_post_create: ${hookPath(".gsd/hooks/canonical")}`,
         "---",
         "",
       ].join("\n"),
@@ -154,21 +154,21 @@ test("prefers canonical global PREFERENCES.md over legacy lowercase preferences.
     mkdirSync(hooksDir, { recursive: true });
     mkdirSync(gsdHomeDir, { recursive: true });
     writeFileSync(
-      join(gsdHomeDir, "PREFERENCES.md"),
-      [
-        "---",
-        "git:",
-        `  worktree_post_create: ${hookPath(".gsd/hooks/canonical")}`,
-        "---",
-        "",
-      ].join("\n"),
-    );
-    writeFileSync(
       join(gsdHomeDir, "preferences.md"),
       [
         "---",
         "git:",
         `  worktree_post_create: ${hookPath(".gsd/hooks/legacy")}`,
+        "---",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(gsdHomeDir, "PREFERENCES.md"),
+      [
+        "---",
+        "git:",
+        `  worktree_post_create: ${hookPath(".gsd/hooks/canonical")}`,
         "---",
         "",
       ].join("\n"),
