@@ -190,7 +190,8 @@
     "strip-ansi": "^7.1.0",
     "typebox": "1.1.38",
     "undici": "^8.3.0",
-    "yaml": "^2.8.2"
+    "yaml": "^2.8.2",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.12.0",

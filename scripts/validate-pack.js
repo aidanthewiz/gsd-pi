@@ -14,7 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const ROOT = resolve(__dirname, '..');
 const require = createRequire(import.meta.url);
-const { getLinkablePackages, getCorePackages } = require('./lib/workspace-manifest.cjs');
+const { getLinkablePackages } = require('./lib/workspace-manifest.cjs');
 
 let tarball = null;
 let installDir = null;
@@ -93,16 +93,16 @@ try {
   npmCacheDir = mkdtempSync(join(tmpdir(), 'validate-pack-npm-cache-'));
   mkdirSync(npmCacheDir, { recursive: true });
 
-  // --- Guard: @gsd/* external dependencies must be declared on the root ---
+  // --- Guard: linkable workspace external dependencies must be declared on the root ---
   // @gsd/* (and @opengsd/*) workspace packages are NOT published to the public
   // registry. They ship inside this tarball under packages/*/dist and are symlinked
   // into node_modules at postinstall (link-workspace-packages.cjs) — they are no
   // longer bundled, and they are no longer listed in the root's dependencies
   // (prepack-resolve-workspace.cjs strips them). Their EXTERNAL (registry) deps must
   // therefore be declared on the root package so `npm install` and the installer's
-  // `npm install --ignore-scripts` repair materialize them; the linked @gsd packages
+  // `npm install --ignore-scripts` repair materialize them; the linked workspace packages
   // then resolve those externals by walking up to the root node_modules.
-  console.log('==> Checking @gsd/* external dependency coverage on root...');
+  console.log('==> Checking linkable workspace external dependency coverage on root...');
   const rootPkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
   const rootExternalDeps = new Set(Object.keys(rootPkg.dependencies || {}));
 
@@ -111,7 +111,7 @@ try {
   }
 
   const missingExternal = new Map();
-  for (const ws of getCorePackages()) {
+  for (const ws of getLinkablePackages()) {
     const pkg = JSON.parse(readFileSync(ws.packageJsonPath, 'utf8'));
     for (const [dep, version] of Object.entries(pkg.dependencies || {})) {
       if (isInternalWorkspaceDep(dep)) continue;
@@ -120,14 +120,14 @@ try {
   }
 
   if (missingExternal.size > 0) {
-    console.log('ERROR: @gsd/* packages depend on externals missing from root dependencies:');
+    console.log('ERROR: Linkable workspace packages depend on externals missing from root dependencies:');
     for (const [dep, version] of [...missingExternal.entries()].sort(([a], [b]) => a.localeCompare(b))) {
       console.log(`    ${dep}@${version}`);
     }
     console.log('    Add these to root package.json dependencies so installs resolve them at runtime.');
     process.exit(1);
   }
-  console.log('    @gsd/* external dependency coverage is complete.');
+  console.log('    Linkable workspace external dependency coverage is complete.');
 
   // --- Pack tarball ---
   // npm pack --ignore-scripts skips prepack; resolve workspace:* for publishable tarballs.
