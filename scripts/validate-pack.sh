@@ -62,7 +62,7 @@ TAR_LIST=$(mktemp)
 tar tzf "$TARBALL" > "$TAR_LIST" 2>/dev/null
 
 MISSING=0
-for required in dist/loader.js packages/pi-coding-agent/dist/index.js scripts/link-workspace-packages.cjs; do
+for required in dist/loader.js packages/pi-coding-agent/dist/index.js packages/daemon/bin/gsd-daemon.js packages/daemon/dist/cli.js scripts/link-workspace-packages.cjs; do
   if ! grep -q "package/${required}" "$TAR_LIST"; then
     echo "    MISSING: $required"
     MISSING=1
