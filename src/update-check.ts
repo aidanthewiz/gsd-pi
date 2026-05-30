@@ -1,9 +1,12 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { execSync } from 'node:child_process'
 import { dirname, join, resolve as resolvePath, sep } from 'node:path'
 import { homedir } from 'node:os'
 import chalk from 'chalk'
 import { appRoot } from './app-paths.js'
-import { execSync } from 'node:child_process'
+import { isPnpmInstall } from './resources/shared/package-manager-detection.js'
+
+export { isPnpmInstall }
 
 const CACHE_FILE = join(appRoot, '.update-check')
 const NPM_PACKAGE_NAME = '@opengsd/gsd-pi'
@@ -101,41 +104,6 @@ export function isBunInstall(argv1: string | undefined = process.argv[1]): boole
 
   const resolved = resolvePath(argv1)
   return bunBinDirs.some((dir) => resolved.startsWith(resolvePath(dir) + sep))
-}
-
-function hasPnpmPath(value: string | undefined): boolean {
-  if (!value) return false
-  const normalized = value.replace(/\\/g, '/').toLowerCase()
-  return (
-    normalized.includes('/.pnpm/') ||
-    normalized.includes('/library/pnpm/') ||
-    normalized.endsWith('/pnpm') ||
-    normalized.endsWith('/pnpm.cjs') ||
-    normalized.endsWith('/pnpm.js')
-  )
-}
-
-function pathStartsWith(pathValue: string, dir: string): boolean {
-  const resolvedPath = resolvePath(pathValue)
-  const resolvedDir = resolvePath(dir)
-  return resolvedPath === resolvedDir || resolvedPath.startsWith(resolvedDir + sep)
-}
-
-export function isPnpmInstall(
-  argv1: string | undefined = process.argv[1],
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
-  if (env.npm_config_user_agent?.startsWith('pnpm/')) return true
-  if (hasPnpmPath(env.npm_execpath)) return true
-  if (hasPnpmPath(argv1)) return true
-  if (!argv1) return false
-
-  const pnpmBinDirs: string[] = []
-  if (env.PNPM_HOME) pnpmBinDirs.push(env.PNPM_HOME)
-  pnpmBinDirs.push(join(homedir(), 'Library', 'pnpm'))
-  pnpmBinDirs.push(join(homedir(), '.local', 'share', 'pnpm'))
-
-  return pnpmBinDirs.some((dir) => pathStartsWith(argv1, dir))
 }
 
 export function resolveInstallCommand(

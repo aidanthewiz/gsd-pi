@@ -1,5 +1,6 @@
 import { execFileSync, spawn } from 'child_process'
-import { join } from 'path'
+import { homedir } from 'os'
+import { join, resolve as resolvePath, sep } from 'path'
 
 const PACKAGE_MANAGERS = new Set(['npm', 'pnpm'])
 
@@ -11,20 +12,37 @@ function hasPnpmPath(value = '') {
   const normalized = value.replace(/\\/g, '/').toLowerCase()
   return (
     normalized.includes('/.pnpm/') ||
-    normalized.includes('/library/pnpm/') ||
     normalized.endsWith('/pnpm') ||
     normalized.endsWith('/pnpm.cjs') ||
     normalized.endsWith('/pnpm.js')
   )
 }
 
+function pathStartsWith(pathValue = '', dir) {
+  if (!pathValue) return false
+  const resolvedPath = resolvePath(pathValue)
+  const resolvedDir = resolvePath(dir)
+  return resolvedPath === resolvedDir || resolvedPath.startsWith(resolvedDir + sep)
+}
+
+function hasPnpmBinPath(env, argv1) {
+  const pnpmBinDirs = []
+  if (env.PNPM_HOME) pnpmBinDirs.push(env.PNPM_HOME)
+  pnpmBinDirs.push(join(homedir(), 'Library', 'pnpm'))
+  pnpmBinDirs.push(join(homedir(), '.local', 'share', 'pnpm'))
+
+  return pnpmBinDirs.some((dir) => pathStartsWith(argv1, dir) || pathStartsWith(env.npm_execpath, dir))
+}
+
 export function detectPackageManager(env = process.env, argv1 = process.argv[1]) {
   const userAgent = env.npm_config_user_agent || ''
   if (userAgent.startsWith('pnpm/')) return 'pnpm'
+  // Installer runs under npm during npm install; keep that context authoritative.
   if (userAgent.startsWith('npm/')) return 'npm'
 
   if (hasPnpmPath(env.npm_execpath || '')) return 'pnpm'
   if (hasPnpmPath(argv1 || '')) return 'pnpm'
+  if (hasPnpmBinPath(env, argv1)) return 'pnpm'
 
   return 'npm'
 }

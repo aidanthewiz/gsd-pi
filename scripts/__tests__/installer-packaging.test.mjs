@@ -36,6 +36,25 @@ test("installer package manager detection ignores unrelated pnpm directory names
     detectPackageManager({ npm_execpath: "/opt/tools/pnpm/wrapper/npm-cli.js" }, ""),
     "npm",
   );
+  assert.equal(
+    detectPackageManager({}, "/opt/library/pnpm/wrapper/npm-cli.js"),
+    "npm",
+  );
+});
+
+test("installer package manager detection uses precise pnpm bin directories", async () => {
+  const { detectPackageManager } = await import("../install/npm-global.js");
+  assert.equal(
+    detectPackageManager({ PNPM_HOME: "/custom/pnpm-home" }, "/custom/pnpm-home/gsd"),
+    "pnpm",
+  );
+  assert.equal(
+    detectPackageManager(
+      { PNPM_HOME: "/custom/pnpm-home", npm_config_user_agent: "npm/10.0.0 node/v22.0.0" },
+      "/custom/pnpm-home/gsd",
+    ),
+    "npm",
+  );
 });
 
 test("installer tarball declares extension-critical externals at the package root", () => {

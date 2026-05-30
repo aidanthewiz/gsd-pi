@@ -163,6 +163,13 @@ test("resolveInstallCommand ignores unrelated paths with pnpm directory names", 
       }),
       "npm install -g @opengsd/gsd-pi@latest",
     );
+    assert.equal(
+      resolveInstallCommand("@opengsd/gsd-pi@latest", {
+        argv1: "/opt/library/pnpm/wrapper/npm-cli.js",
+        env: {} as any,
+      }),
+      "npm install -g @opengsd/gsd-pi@latest",
+    );
   } finally {
     if (orig === undefined) {
       delete (process.versions as Record<string, string | undefined>).bun;
