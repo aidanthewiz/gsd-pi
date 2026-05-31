@@ -311,6 +311,41 @@ describe("project-relocation-recovery (#2750)", () => {
     }
   });
 
+  test("externalGsdRoot syncs .gsd-id after recovering remote-backed state", () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "gsd-reloc-remote-marker-")));
+    initRepo(repo, "https://github.com/example/remote-marker.git");
+
+    const expectedIdentity = repoIdentity(repo);
+    const staleMarkerId = "stale-marker-id";
+    const staleExternal = join(stateDir, "projects", staleMarkerId);
+    mkdirSync(join(staleExternal, "milestones"), { recursive: true });
+    writeFileSync(join(staleExternal, "milestones", "M001.md"), "# Remote Milestone\n", "utf-8");
+    writeFileSync(join(repo, ".gsd-id"), `${staleMarkerId}\n`, "utf-8");
+
+    const recoveredExternal = externalGsdRoot(repo);
+    assert.strictEqual(
+      readFileSync(join(repo, ".gsd-id"), "utf-8").trim(),
+      expectedIdentity,
+      "recovery must update .gsd-id to the identity that now owns migrated state",
+    );
+
+    rmSync(join(repo, ".git", "config"), { force: true });
+
+    try {
+      assert.strictEqual(
+        repoIdentity(repo),
+        expectedIdentity,
+        "transient git failures must keep using the recovered remote-backed identity",
+      );
+      assert.ok(
+        existsSync(join(recoveredExternal, "milestones", "M001.md")),
+        "migrated state remains under the recovered remote-backed identity",
+      );
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
   // ── Edge cases ────────────────────────────────────────────────────────
 
   test("identity remains different for repos with different remotes", () => {

@@ -522,6 +522,7 @@ function resolveExternalPathWithRecovery(projectPath: string): { path: string; i
         }
         // Clean up old directory after successful migration.
         try { rmSync(markerPath, { recursive: true, force: true }); } catch { /* non-fatal */ }
+        writeGsdIdMarker(projectPath, computedId);
       } catch {
         // If migration fails, just point at the old directory.
         return { path: markerPath, identity: markerId };
