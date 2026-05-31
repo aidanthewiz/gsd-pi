@@ -4,8 +4,8 @@
  * Detects skills installed during auto-mode by comparing the current
  * installed catalog and skill directories against a snapshot taken at auto-mode start.
  *
- * New skills are surfaced via resource reload (see system-context) so they
- * appear in the standard `<available_skills>` catalog.
+ * New skills are surfaced via resource reload when possible, with a fallback
+ * prompt block when reload fails before the next agent turn.
  */
 
 import { existsSync, readdirSync, readFileSync, type Dirent } from "node:fs";
@@ -63,7 +63,9 @@ export function detectNewSkills(): DiscoveredSkill[] {
 
 /**
  * Reload the skill catalog when auto-mode detects newly installed skills.
- * Updates the snapshot baseline after reload so detection is one-shot per install.
+ * Returns discovered skills even if reload fails so callers can surface them
+ * in the prompt. Updates the snapshot baseline only after a successful reload
+ * so detection is retried after failures.
  */
 export async function refreshCatalogForNewSkills(options?: {
   reload?: () => Promise<void>;
@@ -78,7 +80,7 @@ export async function refreshCatalogForNewSkills(options?: {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       options.notify?.(`GSD: failed to reload skill catalog: ${message}`, "warning");
-      return [];
+      return newSkills;
     }
   }
 
@@ -88,7 +90,47 @@ export async function refreshCatalogForNewSkills(options?: {
   return newSkills;
 }
 
+export function appendDiscoveredSkillsFallback(systemPrompt: string, skills: DiscoveredSkill[]): string {
+  const missingSkills = skills.filter(skill => !systemPrompt.includes(skill.location));
+  if (missingSkills.length === 0) return systemPrompt;
+
+  return `${systemPrompt}\n\n${formatDiscoveredSkillsXml(missingSkills)}`;
+}
+
 // ─── Internals ────────────────────────────────────────────────────────────────
+
+function formatDiscoveredSkillsXml(skills: DiscoveredSkill[]): string {
+  const lines = [
+    "<newly_discovered_skills>",
+    "  <note>These skills were detected after this session started and may be absent from &lt;available_skills&gt;. If relevant, read the skill file at its location before using it.</note>",
+  ];
+
+  for (const skill of skills) {
+    lines.push(
+      "  <skill>",
+      `    <name>${escapeXml(skill.name)}</name>`,
+      `    <description>${escapeXml(skill.description)}</description>`,
+      `    <location>${escapeXml(skill.location)}</location>`,
+      "  </skill>",
+    );
+  }
+
+  lines.push("</newly_discovered_skills>");
+  return lines.join("\n");
+}
+
+function escapeXml(value: string): string {
+  return value.replace(/[<>&'"]/g, (char) => {
+    switch (char) {
+      case "<": return "&lt;";
+      case ">": return "&gt;";
+      case "&": return "&amp;";
+      case "'": return "&apos;";
+      case "\"": return "&quot;";
+      default: return char;
+    }
+  });
+}
 
 function skillSearchDirs(): string[] {
   return [

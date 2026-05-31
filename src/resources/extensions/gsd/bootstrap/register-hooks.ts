@@ -616,14 +616,14 @@ export function registerHooks(
     await prepareWorkflowMcpForHookContext(ctx, beforeAgentBasePath);
 
     let systemPrompt = event.systemPrompt;
-    const { hasSkillSnapshot, refreshCatalogForNewSkills } = await import("../skill-discovery.js");
+    const { appendDiscoveredSkillsFallback, hasSkillSnapshot, refreshCatalogForNewSkills } = await import("../skill-discovery.js");
     if (hasSkillSnapshot()) {
       const loadedSkills = await refreshCatalogForNewSkills({
         reload: () => (ctx as ExtensionContext & { reload: () => Promise<void> }).reload(),
         notify: (message, level) => ctx.ui.notify(message, level),
       });
       if (loadedSkills.length > 0) {
-        systemPrompt = ctx.getSystemPrompt();
+        systemPrompt = appendDiscoveredSkillsFallback(ctx.getSystemPrompt(), loadedSkills);
       }
     }
 

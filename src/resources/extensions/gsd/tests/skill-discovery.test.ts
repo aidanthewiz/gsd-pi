@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  appendDiscoveredSkillsFallback,
   clearSkillSnapshot,
   detectNewSkills,
   refreshCatalogForNewSkills,
@@ -71,7 +72,7 @@ test("refreshCatalogForNewSkills retries discovery after reload failure", async 
       notify: (message, level) => messages.push({ message, level }),
     });
 
-    assert.deepEqual(failed, []);
+    assert.deepEqual(failed.map(skill => skill.name), ["reload-retry-skill"]);
     assert.deepEqual(detectNewSkills().map(skill => skill.name), ["reload-retry-skill"]);
     assert.equal(messages[0]?.level, "warning");
 
@@ -84,4 +85,27 @@ test("refreshCatalogForNewSkills retries discovery after reload failure", async 
     assert.deepEqual(detectNewSkills(), []);
     assert.ok(messages.some(({ level, message }) => level === "info" && message.includes("reload-retry-skill")));
   });
+});
+
+test("appendDiscoveredSkillsFallback exposes newly detected skills missing from the prompt", () => {
+  const prompt = appendDiscoveredSkillsFallback("base system prompt", [{
+    name: "fallback-skill",
+    description: "Use when reload fails & skill is needed.",
+    location: "/tmp/fallback-skill/SKILL.md",
+  }]);
+
+  assert.match(prompt, /<newly_discovered_skills>/);
+  assert.match(prompt, /fallback-skill/);
+  assert.match(prompt, /Use when reload fails &amp; skill is needed\./);
+  assert.match(prompt, /\/tmp\/fallback-skill\/SKILL.md/);
+});
+
+test("appendDiscoveredSkillsFallback does not duplicate skills already in the prompt", () => {
+  const prompt = "base system prompt\n/tmp/already-loaded/SKILL.md";
+
+  assert.equal(appendDiscoveredSkillsFallback(prompt, [{
+    name: "already-loaded",
+    description: "Already present.",
+    location: "/tmp/already-loaded/SKILL.md",
+  }]), prompt);
 });
