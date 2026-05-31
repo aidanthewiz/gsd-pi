@@ -191,6 +191,32 @@ test("resolveAgentEnd resolves a pending runUnit promise", async () => {
   assert.deepEqual(result.event, event);
 });
 
+test("runUnit clears scoped skill visibility after a manifest-scoped unit completes", async () => {
+  _resetPendingResolve();
+
+  const ctx = makeMockCtx();
+  const pi = makeMockPi();
+  const skillVisibilityCalls: Array<string[] | undefined> = [];
+  let visibleSkills: string[] | undefined;
+  pi.setVisibleSkills = (names: string[] | undefined) => {
+    visibleSkills = names;
+    skillVisibilityCalls.push(names);
+  };
+  const s = makeMockSession();
+
+  const resultPromise = runUnit(ctx, pi, s, "plan-slice", "M001/S01", "prompt");
+
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(Array.isArray(visibleSkills), "unit dispatch should scope skills before the turn starts");
+
+  resolveAgentEnd(makeEvent());
+
+  const result = await resultPromise;
+  assert.equal(result.status, "completed");
+  assert.equal(visibleSkills, undefined);
+  assert.equal(skillVisibilityCalls.at(-1), undefined);
+});
+
 test("runUnit honors ScheduleWakeup by continuing the same unit session", async () => {
   _resetPendingResolve();
   _resetAutoWakeupsForTest();
