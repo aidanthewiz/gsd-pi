@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getModels } from "../models.ts";
+import { getModels } from "../src/models.ts";
 
 const bedrockModelIds = new Set(getModels("amazon-bedrock").map((model) => model.id));
 
