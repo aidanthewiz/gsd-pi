@@ -8,6 +8,12 @@ This changelog starts from the `open-gsd/gsd-pi` ownership baseline. Earlier pro
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-05-31
+
+### Fixed
+- sync engine package lockfile entries
+- wait for npm release tarball propagation
+
 ## [1.1.0] - 2026-05-31
 
 ### Added
