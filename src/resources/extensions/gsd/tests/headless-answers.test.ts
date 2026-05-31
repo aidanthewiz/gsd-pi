@@ -331,7 +331,7 @@ test('tryHandle deferred resolution — observeEvent after tryHandle', async (t)
 // ---------------------------------------------------------------------------
 
 test('getSecretEnvVars returns secrets map', (t) => {
-  const secrets = { API_KEY: 'sk-123', DB_URL: 'postgres://localhost/db' };
+  const secrets = { API_KEY: 'sk-123', DB_URL: 'db-local-fixture' };
   const injector = new AnswerInjector({ secrets });
 
   assert.deepStrictEqual(injector.getSecretEnvVars(), secrets);
