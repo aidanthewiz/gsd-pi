@@ -166,8 +166,10 @@ export async function runUnit(
     }
   }
 
-  if (typeof pi.setVisibleSkills === "function") {
-    applyUnitSkillVisibility(pi, unitType);
+  const setVisibleSkills =
+    typeof pi.setVisibleSkills === "function" ? pi.setVisibleSkills.bind(pi) : undefined;
+  if (setVisibleSkills) {
+    applyUnitSkillVisibility({ setVisibleSkills }, unitType);
   }
 
   // ── Create the agent_end promise (per-unit one-shot) ──
@@ -181,6 +183,7 @@ export async function runUnit(
   const pendingSwitchCancellation = _consumePendingSwitchCancellation();
   if (pendingSwitchCancellation) {
     _clearCurrentResolve();
+    setVisibleSkills?.(undefined);
     return {
       status: "cancelled",
       ...(pendingSwitchCancellation.errorContext ? { errorContext: pendingSwitchCancellation.errorContext } : {}),
@@ -205,6 +208,7 @@ export async function runUnit(
 
       if (!ready) {
         _clearCurrentResolve();
+        setVisibleSkills?.(undefined);
         return {
           status: "cancelled",
           errorContext: {
@@ -356,6 +360,7 @@ export async function runUnit(
   } finally {
     if (unitTimeoutHandle) clearTimeout(unitTimeoutHandle);
     ctx.ui.setWorkingMessage?.(undefined);
+    setVisibleSkills?.(undefined);
   }
   debugLog("runUnit", {
     phase: "agent-end-received",
