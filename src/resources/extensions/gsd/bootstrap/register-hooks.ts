@@ -608,17 +608,21 @@ export function registerHooks(
     }
     clearDeferredApprovalGate(beforeAgentBasePath);
 
+    let systemPrompt = event.systemPrompt;
     const { hasSkillSnapshot, refreshCatalogForNewSkills } = await import("../skill-discovery.js");
     if (hasSkillSnapshot()) {
-      await refreshCatalogForNewSkills({
-        reload: () => ctx.reload(),
+      const loadedSkills = await refreshCatalogForNewSkills({
+        reload: () => (ctx as ExtensionContext & { reload: () => Promise<void> }).reload(),
         notify: (message, level) => ctx.ui.notify(message, level),
       });
+      if (loadedSkills.length > 0) {
+        systemPrompt = ctx.getSystemPrompt();
+      }
     }
 
     // GSD's own context injection (existing behavior — unchanged).
     const { buildBeforeAgentStartResult } = await import("./system-context.js");
-    const gsdResult = await buildBeforeAgentStartResult(event, ctx);
+    const gsdResult = await buildBeforeAgentStartResult({ ...event, systemPrompt }, ctx);
 
     // Refresh the snapshot used by ecosystem getPhase()/getActiveUnit().
     // deriveState has its own ~100ms cache so this is cheap on repeat calls.

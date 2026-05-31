@@ -20,6 +20,10 @@ import type { ExtensionBindings, ToolDefinitionEntry } from "./agent-session-typ
 import type { SessionStartEvent } from "@gsd/pi-coding-agent/core/extensions/index.js";
 import type { AgentSessionHost } from "./agent-session-host.js";
 
+function normalizeSkillFilterName(name: string): string {
+	return name.trim().toLowerCase();
+}
+
 export class AgentSessionExtensionsModule {
 	constructor(readonly host: AgentSessionHost) {}
 
@@ -536,7 +540,8 @@ export class AgentSessionExtensionsModule {
 			skillFilter: (skill) => {
 				const visible = this.host._visibleSkillNames;
 				if (visible === undefined) return true;
-				return visible.includes(skill.name);
+				const skillName = normalizeSkillFilterName(skill.name);
+				return visible.some((name) => normalizeSkillFilterName(name) === skillName);
 			},
 		};
 		return buildSystemPrompt(this.host._baseSystemPromptOptions);
