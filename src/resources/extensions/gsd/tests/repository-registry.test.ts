@@ -115,3 +115,16 @@ test("repository registry keeps project root anchored to .gsd project in monorep
   assert.equal(registry.projectRoot, subproject);
   assert.equal(registry.byId.get("project")?.root, subproject);
 });
+
+test("repository registry uses external-state worktree checkout as project root", (t) => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-repo-registry-external-"));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const worktree = join(base, ".gsd", "projects", "abc123", "worktrees", "M001");
+  mkdirSync(worktree, { recursive: true });
+  execFileSync("git", ["init"], { cwd: worktree, stdio: "ignore" });
+
+  const registry = createRepositoryRegistryFromPreferences(worktree, undefined);
+
+  assert.equal(registry.projectRoot, worktree);
+  assert.equal(registry.byId.get("project")?.root, worktree);
+});
