@@ -1381,9 +1381,13 @@ export async function stopAuto(
   const loadedPreferences = loadEffectiveGSDPreferences(s.basePath || undefined)?.preferences;
   const stopNotificationPrefix = formatAutoStopNotificationPrefix(reason);
   const displayReason = formatAutoStopDisplayReason(reason);
+  const isHeadlessStop = process.env.GSD_HEADLESS === "1";
   const completionStopRequested = Boolean(options.completionWidget);
-  const installCompletionWidget = completionStopRequested;
-  const preserveCompletionSurface = completionStopRequested;
+  const preserveCloseoutTranscript = !isHeadlessStop && (
+    options.preserveCloseoutTranscript ?? completionStopRequested
+  );
+  const installCompletionWidget = completionStopRequested && !preserveCloseoutTranscript;
+  const preserveCompletionSurface = completionStopRequested || preserveCloseoutTranscript;
   s.completionStopInProgress = preserveCompletionSurface;
 
   // #4764 — telemetry: record the exit reason, isolation mode, whether an auto
@@ -1808,8 +1812,9 @@ export async function stopAuto(
     if (installCompletionWidget) {
       // Completion stops keep the durable final closeout surface visible.
     } else if (preserveCompletionSurface) {
-      ctx?.ui.setWidget("gsd-progress", undefined);
-      ctx?.ui.setWidget("gsd-outcome", undefined);
+      // Foreground closeout-boundary stops preserve the transcript that the
+      // completing unit already printed. Avoid replacing it with a widget or
+      // clearing the progress slot, which can push the closeout into scrollback.
     } else {
       ctx?.ui.setWidget("gsd-progress", undefined);
       const status = isBlockedStopReason(reason) ? "blocked" : reason?.toLowerCase().includes("fail") ? "failed" : "stopped";
