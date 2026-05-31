@@ -894,7 +894,13 @@ export async function autoLoop(
             break;
           }
 
-          if (orchestrationResult.kind === "paused" || orchestrationResult.kind === "error") {
+          if (orchestrationResult.kind === "paused") {
+            s.pendingOrchestrationDispatch = null;
+            finishTurn("skipped");
+            continue;
+          }
+
+          if (orchestrationResult.kind === "error") {
             s.pendingOrchestrationDispatch = null;
             await deps.pauseAuto(ctx, pi, {
               message: orchestrationResult.reason,

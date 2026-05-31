@@ -122,6 +122,20 @@ export async function reconcileBeforeDispatch(
   const persistent = await detectAllDrift(finalState, finalCtx, registry);
 
   if (persistent.length > 0) {
+    const blockers: string[] = [];
+    for (const record of persistent) {
+      const handler = registry.find((h) => h.kind === record.kind);
+      const blocker = handler?.blocker ? await handler.blocker(record, finalCtx) : null;
+      if (blocker) blockers.push(blocker);
+    }
+    if (blockers.length > 0) {
+      return {
+        ok: true,
+        stateSnapshot: finalState,
+        repaired,
+        blockers: [...new Set([...(finalState.blockers ?? []), ...blockers])],
+      };
+    }
     throw new ReconciliationFailedError({ persistentDrift: persistent });
   }
 

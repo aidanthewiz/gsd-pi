@@ -286,6 +286,41 @@ test("ADR-017: terminal drift blockers take precedence over co-occurring repair 
   assert.deepEqual(result.blockers, ["manual completed-milestone review required"]);
 });
 
+test("ADR-017: terminal drift found after repair cap returns blockers", async () => {
+  const repairDrift: DriftRecord = { kind: "stale-sketch-flag", mid: "M001", sid: "S02" };
+  const terminalDrift: DriftRecord = {
+    kind: "completed-milestone-reopened",
+    milestoneId: "M001",
+    dbStatus: "active",
+  };
+  let repairCount = 0;
+  const repairHandler: DriftHandler = {
+    kind: "stale-sketch-flag",
+    detect: () => (repairCount < 2 ? [repairDrift] : []),
+    repair: () => {
+      repairCount++;
+    },
+  };
+  const terminalHandler: DriftHandler = {
+    kind: "completed-milestone-reopened",
+    detect: () => (repairCount >= 2 ? [terminalDrift] : []),
+    blocker: () => "manual completed-milestone review required",
+    repair: () => {
+      throw new Error("repair should not run for terminal blockers");
+    },
+  };
+
+  const result = await reconcileBeforeDispatch("/project", {
+    invalidateStateCache: () => {},
+    deriveState: async () => makeState(),
+    registry: [repairHandler, terminalHandler],
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.repaired.length, 2);
+  assert.deepEqual(result.blockers, ["manual completed-milestone review required"]);
+});
+
 // ─── #5701: merge-state drift ────────────────────────────────────────────────
 
 function makeGitBase(): string {
