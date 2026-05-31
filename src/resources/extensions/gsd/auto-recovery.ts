@@ -424,11 +424,13 @@ export function verifyExpectedArtifact(
       for (const slice of roadmap.slices) {
         if (slice.done) continue;
         if (milestoneResearchFile && slice.id === "S01") continue;
-        const depsComplete = (slice.depends ?? []).every((depId) =>
-          !!resolveSliceFile(base, mid, depId, "SUMMARY"),
-        );
+        const depsComplete = (slice.depends ?? []).every((depId) => {
+          const summaryPath = resolveExpectedArtifactPath("complete-slice", `${mid}/${depId}`, base);
+          return !!summaryPath && existsSync(summaryPath);
+        });
         if (!depsComplete) continue;
-        if (!resolveSliceFile(base, mid, slice.id, "RESEARCH")) {
+        const researchPath = resolveExpectedArtifactPath("research-slice", `${mid}/${slice.id}`, base);
+        if (!researchPath || !existsSync(researchPath)) {
           logWarning("recovery", `verify-fail ${unitType} ${unitId}: slice ${slice.id} missing RESEARCH`);
           return false;
         }
