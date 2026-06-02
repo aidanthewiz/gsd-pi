@@ -733,6 +733,7 @@ export function updateProgressWidget(
         logWarning("dashboard", `DB status update failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     }, 15_000);
+    progressRefreshTimer.unref?.();
 
     return {
       render(width: number): string[] {
