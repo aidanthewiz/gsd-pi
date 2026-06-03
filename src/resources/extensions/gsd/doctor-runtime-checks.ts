@@ -269,14 +269,14 @@ export async function checkRuntimeHealth(
         } catch {
           count = MAX_UAT_ATTEMPTS + 1;
         }
-        if (count <= MAX_UAT_ATTEMPTS) continue;
+        if (count < MAX_UAT_ATTEMPTS) continue;
 
         issues.push({
           severity: "warning",
           code: "uat_retry_exhausted",
           scope: "slice",
           unitId: `${mid}/${sid}`,
-          message: `run-uat for ${mid}/${sid} exhausted ${count - 1} retry attempt(s) without an ASSESSMENT verdict. Reset the retry counter after fixing the underlying UAT/tool issue, then rerun /gsd auto.`,
+          message: `run-uat for ${mid}/${sid} exhausted ${count} attempt(s) without an ASSESSMENT verdict. Reset the retry counter after fixing the underlying UAT/tool issue, then rerun /gsd auto.`,
           file: `.gsd/runtime/${fileName}`,
           fixable: true,
         });
