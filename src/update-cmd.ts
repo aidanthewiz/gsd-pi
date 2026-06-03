@@ -7,6 +7,8 @@ import {
   GSD_BROWSER_PACKAGE_NAME,
   GSD_BROWSER_REGISTRY_URL,
   GSD_PI_PACKAGE_NAME,
+  pickHigherVersion,
+  resolveGsdBrowserPathVersion,
   resolveInstallCommand,
   resolveInstalledPackageVersion,
 } from './update-check.js'
@@ -24,7 +26,8 @@ function formatCurrentVersion(version: string | null): string {
 }
 
 async function runBrowserUpdate(): Promise<void> {
-  const current = resolveInstalledPackageVersion(GSD_BROWSER_PACKAGE_NAME)
+  const bundled = resolveInstalledPackageVersion(GSD_BROWSER_PACKAGE_NAME)
+  const current = pickHigherVersion(bundled, resolveGsdBrowserPathVersion())
   const bold = '\x1b[1m'
   const dim = '\x1b[2m'
   const green = '\x1b[32m'
@@ -55,6 +58,14 @@ async function runBrowserUpdate(): Promise<void> {
       stdio: 'inherit',
     })
     process.stdout.write(`\n${green}${bold}Updated gsd-browser to v${latest}${reset}\n`)
+    // Verify the new version is reachable via PATH (MCP prefers PATH binary when newer)
+    const newPathVersion = resolveGsdBrowserPathVersion()
+    if (!newPathVersion || compareSemver(newPathVersion, latest) < 0) {
+      process.stdout.write(
+        `${yellow}Note:${reset} ${dim}Ensure the npm global bin directory is on your PATH` +
+        ` so MCP automation uses the updated binary.${reset}\n`,
+      )
+    }
   } catch {
     process.stderr.write(`\n${yellow}gsd-browser update failed. Try manually: ${installCmd}${reset}\n`)
     process.exit(1)

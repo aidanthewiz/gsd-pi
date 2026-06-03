@@ -12,7 +12,7 @@ import { join } from "node:path";
 
 import { runUpdate } from "../update-cmd.ts";
 import { handleUpdate } from "../resources/extensions/gsd/commands-handlers.ts";
-import { GSD_BROWSER_PACKAGE_NAME, resolveInstalledPackageVersion } from "../update-check.js";
+import { GSD_BROWSER_PACKAGE_NAME, GSD_BROWSER_REGISTRY_URL, resolveInstalledPackageVersion } from "../update-check.js";
 
 test("update-cmd prints latest version before comparison (#3445)", async (t) => {
   const originalFetch = globalThis.fetch;
@@ -448,6 +448,74 @@ test("isBunInstall returns true when running under Bun runtime (#4145)", async (
     }
     process.argv[1] = origArgv1;
   }
+});
+
+test("runBrowserUpdate uses PATH version as current when it is newer than bundled", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalStdoutWrite = process.stdout.write;
+  const originalBrowserPathVersion = process.env.GSD_BROWSER_PATH_VERSION;
+  const writes: string[] = [];
+
+  t.after(() => {
+    if (originalBrowserPathVersion === undefined) {
+      delete process.env.GSD_BROWSER_PATH_VERSION;
+    } else {
+      process.env.GSD_BROWSER_PATH_VERSION = originalBrowserPathVersion;
+    }
+  });
+
+  try {
+    // PATH has 99.0.0 and registry reports the same — should be "up to date"
+    process.env.GSD_BROWSER_PATH_VERSION = "99.0.0";
+    globalThis.fetch = async (input) => {
+      assert.equal(String(input), GSD_BROWSER_REGISTRY_URL);
+      return Response.json({ version: "99.0.0" });
+    };
+    (process.stdout as any).write = (chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    };
+
+    await runUpdate({ target: "browser" });
+  } finally {
+    globalThis.fetch = originalFetch;
+    (process.stdout as any).write = originalStdoutWrite;
+  }
+
+  const output = writes.join("");
+  assert.match(output, /Current gsd-browser version:.*99\.0\.0/);
+  assert.match(output, /gsd-browser is already up to date/);
+});
+
+test("/gsd update browser uses PATH version as current when it is newer than bundled", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalBrowserPathVersion = process.env.GSD_BROWSER_PATH_VERSION;
+  const notifications: Array<{ message: string; level: string }> = [];
+
+  t.after(() => {
+    if (originalBrowserPathVersion === undefined) {
+      delete process.env.GSD_BROWSER_PATH_VERSION;
+    } else {
+      process.env.GSD_BROWSER_PATH_VERSION = originalBrowserPathVersion;
+    }
+  });
+
+  try {
+    process.env.GSD_BROWSER_PATH_VERSION = "99.0.0";
+    globalThis.fetch = async () => Response.json({ version: "99.0.0" });
+
+    await handleUpdate({
+      ui: {
+        notify(message: string, level: string) {
+          notifications.push({ message, level });
+        },
+      },
+    } as any, "browser");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.ok(notifications.some((n) => n.message.includes("Already up to date")));
 });
 
 test("isPnpmInstall detects pnpm user agent, exec path, and PNPM_HOME", async () => {

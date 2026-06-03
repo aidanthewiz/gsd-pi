@@ -7,6 +7,7 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@gsd/pi-coding-agent";
 import { existsSync, readFileSync, mkdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { join, resolve as resolvePath, sep } from "node:path";
 import { homedir } from "node:os";
@@ -494,6 +495,30 @@ function formatCommandVersion(version: string | null): string {
   return version ? `v${version}` : "unknown";
 }
 
+function pickHigherVersionForCommand(a: string | null, b: string | null): string | null {
+  if (!a) return b;
+  if (!b) return a;
+  return compareSemverLocal(a, b) >= 0 ? a : b;
+}
+
+// Mirrors resolveGsdBrowserPathVersion in src/update-check.ts — duplicated because
+// tsconfig.resources.json rootDir prevents importing from src/.
+function resolveGsdBrowserPathVersionForCommand(env: NodeJS.ProcessEnv = process.env): string | null {
+  const explicit = env.GSD_BROWSER_PATH_VERSION?.trim();
+  if (explicit) return explicit.match(/\b(\d+\.\d+\.\d+)\b/)?.[1] ?? null;
+  try {
+    const out = execFileSync("gsd-browser", ["--version"], {
+      encoding: "utf-8",
+      env,
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2000,
+    });
+    return out.match(/\b(\d+\.\d+\.\d+)\b/)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function handleUpdate(ctx: ExtensionCommandContext, args = ""): Promise<void> {
   const { execSync } = await import("node:child_process");
 
@@ -506,8 +531,11 @@ export async function handleUpdate(ctx: ExtensionCommandContext, args = ""): Pro
 
   const NPM_PACKAGE = browserUpdate ? GSD_BROWSER_PACKAGE : GSD_PI_PACKAGE;
   const registryUrl = browserUpdate ? BROWSER_UPDATE_REGISTRY_URL : UPDATE_REGISTRY_URL;
-  const current = browserUpdate
+  const bundledVersion = browserUpdate
     ? resolveInstalledPackageVersionForCommand(GSD_BROWSER_PACKAGE)
+    : null;
+  const current = browserUpdate
+    ? pickHigherVersionForCommand(bundledVersion, resolveGsdBrowserPathVersionForCommand())
     : process.env.GSD_VERSION || "0.0.0";
   const label = browserUpdate ? "gsd-browser version" : "version";
 
@@ -531,9 +559,12 @@ export async function handleUpdate(ctx: ExtensionCommandContext, args = ""): Pro
     execSync(installCmd, {
       stdio: ["ignore", "pipe", "ignore"],
     });
+    const newPathVersion = browserUpdate ? resolveGsdBrowserPathVersionForCommand() : null;
+    const pathReady = !browserUpdate || (!!newPathVersion && compareSemverLocal(newPathVersion, latest) >= 0);
     ctx.ui.notify(
       browserUpdate
-        ? `Updated gsd-browser to v${latest}. Restart your GSD session to use the new browser automation version.`
+        ? `Updated gsd-browser to v${latest}. Restart your GSD session to use the new browser automation version.` +
+          (pathReady ? "" : "\nNote: Ensure the npm global bin directory is on your PATH so MCP automation uses the updated binary.")
         : `Updated to v${latest}. Restart your GSD session to use the new version.`,
       "info",
     );

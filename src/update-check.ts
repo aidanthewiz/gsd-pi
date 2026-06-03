@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { execSync } from 'node:child_process'
+import { execSync, execFileSync } from 'node:child_process'
 import { dirname, join, resolve as resolvePath, sep } from 'node:path'
 import { homedir } from 'node:os'
 import { createRequire } from 'node:module'
@@ -82,6 +82,33 @@ export function resolveInstalledPackageVersion(packageName: string): string | nu
   }
 }
 
+/**
+ * Resolves the gsd-browser version from PATH (via `gsd-browser --version`).
+ * Respects GSD_BROWSER_PATH_VERSION env override for testing.
+ * Returns null if gsd-browser is not on PATH or times out.
+ */
+export function resolveGsdBrowserPathVersion(env: NodeJS.ProcessEnv = process.env): string | null {
+  const explicit = env.GSD_BROWSER_PATH_VERSION?.trim()
+  if (explicit) return explicit.match(/\b(\d+\.\d+\.\d+)\b/)?.[1] ?? null
+  try {
+    const out = execFileSync('gsd-browser', ['--version'], {
+      encoding: 'utf-8',
+      env,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 2000,
+    })
+    return out.match(/\b(\d+\.\d+\.\d+)\b/)?.[1] ?? null
+  } catch {
+    return null
+  }
+}
+
+export function pickHigherVersion(a: string | null, b: string | null): string | null {
+  if (!a) return b
+  if (!b) return a
+  return compareSemver(a, b) >= 0 ? a : b
+}
+
 export async function fetchLatestVersionFromRegistry(
   registryUrl: string = DEFAULT_REGISTRY_URL,
   fetchTimeoutMs: number = FETCH_TIMEOUT_MS,
@@ -162,7 +189,11 @@ function defaultCurrentVersion(packageName: string): string | null {
   if (packageName === GSD_PI_PACKAGE_NAME) {
     return process.env.GSD_VERSION || '0.0.0'
   }
-  return resolveInstalledPackageVersion(packageName)
+  const bundled = resolveInstalledPackageVersion(packageName)
+  if (packageName === GSD_BROWSER_PACKAGE_NAME) {
+    return pickHigherVersion(bundled, resolveGsdBrowserPathVersion())
+  }
+  return bundled
 }
 
 function defaultCachePath(packageName: string): string {
