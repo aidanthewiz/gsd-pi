@@ -1,11 +1,13 @@
 // Project/App: gsd-pi
 // File Purpose: Shared browser-observable UAT requirement and evidence detection.
 
-export const BROWSER_REQUIREMENT_RE = /\b(?:browser|file:\/\/|localhost|dom|localstorage|click(?:ing|ed)?|button|screenshot|snapshot|reload(?:ed)?|page refresh|user-visible|strikethrough|search box)\b/i;
+export const BROWSER_REQUIREMENT_RE = /\b(?:file:\/\/|localhost|playwright|chrome|screenshot|snapshot|browser_(?:assert|batch|find|verify|snapshot_refs))\b|\b(?:open|launch|navigate|load|visit|serve|start)\b.{0,80}\b(?:browser|page|localhost|file:\/\/)\b|\bbrowser\s+(?:check|session|test|uat|tool|automation|interaction|flow)\b/i;
 export const NO_BROWSER_EVIDENCE_RE = /\b(?:no|without|not|wasn'?t|isn'?t)\s+(?:automated\s+)?(?:live\s+)?browser(?:\s+(?:session|test|uat))?|\bno\s+automated\s+browser\b|\bnot\s+conducted\b/i;
 export const BROWSER_RUNTIME_RE = /\b(?:browser|playwright|chrome|camoufox|browser_(?:assert|batch|find|verify|snapshot_refs)|screenshot|snapshot|file:\/\/|localhost)\b/i;
 export const BROWSER_ACTION_RE = /\b(?:open(?:ed)?|navigate(?:d)?|click(?:ed)?|type(?:d)?|reload(?:ed)?|capture(?:d)?|screenshot|snapshot)\b/i;
 export const BROWSER_ASSERTION_RE = /\b(?:assert(?:ed|ion)?|observed|confirmed|verified|expected|visible|text|count|label|strikethrough|localstorage|screenshot|snapshot|passed)\b/i;
+const NON_REQUIREMENT_BROWSER_HEADING_RE = /^(?:not\s+proven|not\s+covered|out\s+of\s+scope|deferred|follow-?ups?|known\s+limitations|notes\s+for\s+tester)\b/i;
+const NON_REQUIREMENT_BROWSER_LINE_RE = /\b(?:deferred|not\s+proven|not\s+covered|out\s+of\s+scope|future\s+slice|follow-?up|no\s+(?:live\s+)?browser|without\s+(?:a\s+)?browser|not\s+(?:a\s+)?browser)\b/i;
 
 export function compactTextParts(parts: Array<string | string[] | null | undefined>): string {
   return parts.flatMap((part) => Array.isArray(part) ? part : [part])
@@ -14,7 +16,17 @@ export function compactTextParts(parts: Array<string | string[] | null | undefin
 }
 
 export function hasBrowserRequiredText(text: string): boolean {
-  return BROWSER_REQUIREMENT_RE.test(text);
+  let inNonRequirementSection = false;
+  for (const line of text.split(/\r?\n/)) {
+    const headingMatch = line.match(/^#{1,6}\s+(.+?)\s*$/);
+    if (headingMatch) {
+      inNonRequirementSection = NON_REQUIREMENT_BROWSER_HEADING_RE.test(headingMatch[1] ?? "");
+      continue;
+    }
+    if (inNonRequirementSection || NON_REQUIREMENT_BROWSER_LINE_RE.test(line)) continue;
+    if (BROWSER_REQUIREMENT_RE.test(line)) return true;
+  }
+  return false;
 }
 
 export function hasBrowserEvidenceText(text: string): boolean {
