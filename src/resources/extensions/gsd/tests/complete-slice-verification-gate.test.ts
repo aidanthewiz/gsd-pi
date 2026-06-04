@@ -155,6 +155,93 @@ describe('complete-slice verification gate (#3580)', () => {
     }
   });
 
+  // ── Browser/web UAT classification gate (M001/S03 regression) ──────────
+  const BROWSER_UAT_BODY = [
+    '## UAT Type',
+    '- UAT mode: artifact-driven',
+    '',
+    '## Smoke Test',
+    '1. Open the page in a browser and perform add/edit/complete/delete once.',
+  ].join('\n');
+
+  test('rejects an artifact-driven UAT that drives a browser (open the page in a browser)', async () => {
+    const result = await handleCompleteSlice(
+      makeParams({ uatContent: BROWSER_UAT_BODY }),
+      basePath,
+    );
+    assert.ok('error' in result, 'expected handler to reject a browser UAT mislabeled artifact-driven');
+    assert.match((result as { error: string }).error, /browser-capable mode|browser-executable/i);
+  });
+
+  test('rejects a runtime-executable UAT that navigates to a localhost URL', async () => {
+    const body = [
+      '## UAT Type',
+      '- UAT mode: runtime-executable',
+      '',
+      '## Test Cases',
+      '1. Navigate to http://localhost:3000 and verify the dashboard renders.',
+    ].join('\n');
+    const result = await handleCompleteSlice(
+      makeParams({ uatContent: body }),
+      basePath,
+    );
+    assert.ok('error' in result, 'expected handler to reject a browser UAT mislabeled runtime-executable');
+    assert.match((result as { error: string }).error, /browser-capable mode|browser-executable/i);
+  });
+
+  test('allows an artifact-driven UAT that only disclaims browser coverage (no false positive)', async () => {
+    // S01-style: genuinely artifact-driven persistence scaffolding that merely
+    // mentions "cross-browser" / "browser-level" in a Not-Proven disclaimer.
+    const body = [
+      '## UAT Type',
+      '- UAT mode: artifact-driven',
+      '',
+      '## Not Proven By This UAT',
+      '- Interactive browser-level CRUD and real cross-browser localStorage behavior.',
+    ].join('\n');
+    const result = await handleCompleteSlice(
+      makeParams({ uatContent: body }),
+      basePath,
+    );
+    if ('error' in result) {
+      assert.doesNotMatch(
+        result.error,
+        /browser-capable mode/i,
+        `disclaimer-only mention must not trip the browser gate, got: ${result.error}`,
+      );
+    }
+  });
+
+  test('allows a browser UAT when it is declared browser-executable', async () => {
+    const body = BROWSER_UAT_BODY.replace('artifact-driven', 'browser-executable');
+    const result = await handleCompleteSlice(
+      makeParams({ uatContent: body }),
+      basePath,
+    );
+    if ('error' in result) {
+      assert.doesNotMatch(
+        result.error,
+        /browser-capable mode/i,
+        `browser-executable UAT must pass the browser gate, got: ${result.error}`,
+      );
+    }
+  });
+
+  test('allows a browser UAT when it is declared mixed (mixed receives browser tools)', async () => {
+    const body = BROWSER_UAT_BODY.replace('artifact-driven', 'mixed (artifact-driven + browser)');
+    const result = await handleCompleteSlice(
+      makeParams({ uatContent: body }),
+      basePath,
+    );
+    if ('error' in result) {
+      assert.doesNotMatch(
+        result.error,
+        /browser-capable mode/i,
+        `mixed UAT must pass the browser gate, got: ${result.error}`,
+      );
+    }
+  });
+
   test('backfills prior verification narrative when verification is omitted on re-completion', async () => {
     // Seed full_summary_md with a prior verification narrative (simulates a
     // previous completion where the verification text was recorded).

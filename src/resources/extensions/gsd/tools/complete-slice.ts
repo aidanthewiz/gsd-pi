@@ -34,7 +34,7 @@ import { getGatesForTurn } from "../gate-registry.js";
 import { gsdProjectionRoot, clearPathCache, resolveMilestoneFile } from "../paths.js";
 import { resolveCanonicalMilestoneRoot } from "../worktree-manager.js";
 import { checkOwnership, sliceUnitKey } from "../unit-ownership.js";
-import { saveFile, clearParseCache } from "../files.js";
+import { saveFile, clearParseCache, extractUatType } from "../files.js";
 import { invalidateStateCache } from "../state.js";
 import { renderRoadmapFromDb } from "../markdown-renderer.js";
 import { parseRoadmap } from "../parsers-legacy.js";
@@ -340,6 +340,24 @@ export async function handleCompleteSlice(
   const BLOCKED_SIGNALS = /\b(status:\s*blocked|verification_result:\s*failed|slice is blocked|cannot complete|verification failed)\b/i;
   if (BLOCKED_SIGNALS.test(params.verification || "") || BLOCKED_SIGNALS.test(params.uatContent || "")) {
     return { error: `slice verification indicates blocked/failed state — do not complete a slice that has not passed verification. Address the blockers and re-verify first.` };
+  }
+
+  // ── Browser/web UAT classification gate ────────────────────────────────
+  // A UAT that drives a running web UI (opening a page in a browser,
+  // navigating a URL, or hitting localhost) must declare a browser-capable
+  // mode so the run-uat runner surfaces gsd-browser and actually launches it.
+  // Otherwise the browser checks get silently deferred to a human and the slice
+  // passes on static checks alone (M001/S03 regression). `browser-executable`,
+  // `live-runtime`, and `mixed` all receive browser tools (see
+  // BROWSER_INCLUSIVE_UAT_TYPES); only the non-browser modes are rejected here.
+  const BROWSER_UAT_SIGNALS =
+    /\b(?:in (?:a|the|your|one|any)\s+(?:modern\s+)?browser|open(?:ing)?\s+(?:the\s+)?(?:page|app|site)\b|navigat\w*\s+to\b|gsd-browser|https?:\/\/localhost|localhost:\d)\b/i;
+  const NON_BROWSER_UAT_MODES = new Set(["artifact-driven", "runtime-executable"]);
+  const declaredUatMode = extractUatType(params.uatContent || "") ?? "artifact-driven";
+  if (NON_BROWSER_UAT_MODES.has(declaredUatMode) && BROWSER_UAT_SIGNALS.test(params.uatContent || "")) {
+    return {
+      error: `UAT describes browser/web interaction (opening a page in a browser, navigating a URL, or hitting localhost) but declares non-browser mode "${declaredUatMode}". A webpage/site/app UAT must use a browser-capable mode so gsd-browser launches automatically — set "UAT mode: browser-executable" (or a browser-inclusive "mixed"/"live-runtime") and include at least one concrete browser check. Re-author the UAT Type section and complete the slice again.`,
+    };
   }
 
   // ── Guards + DB writes inside a single transaction (prevents TOCTOU) ───
