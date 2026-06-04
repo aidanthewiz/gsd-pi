@@ -850,6 +850,34 @@ test("transport compatibility still blocks units whose MCP tools are not exposed
   assert.match(error ?? "", /currently exposes only/);
 });
 
+test("discuss-milestone guided flow does not abort when all required tools are on MCP surface (regression #469)", () => {
+  // Before the fix, activeTools being non-empty caused uniqueRequired to be filtered
+  // against the pi host tool list instead of MCP_WORKFLOW_TOOL_SURFACE, making every
+  // surface tool appear missing and aborting the guided flow with a false error.
+  const discussMilestoneTools = [
+    "gsd_summary_save",
+    "gsd_requirement_save",
+    "gsd_requirement_update",
+    "gsd_plan_milestone",
+    "gsd_milestone_generate_id",
+  ];
+  const error = getWorkflowTransportSupportError(
+    "claude-code",
+    discussMilestoneTools,
+    {
+      projectRoot: "/tmp/project",
+      env: { GSD_WORKFLOW_MCP_COMMAND: "node" },
+      surface: "guided flow",
+      unitType: "discuss-milestone",
+      authMode: "externalCli",
+      baseUrl: "local://claude-code",
+      activeTools: ["ScheduleWakeup", "ToolSearch", "bash", "read", "write"],
+    },
+  );
+
+  assert.equal(error, null);
+});
+
 test("transport compatibility accepts MCP-namespaced runtime tools", () => {
   const error = getWorkflowTransportSupportError(
     "claude-code",
