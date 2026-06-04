@@ -1036,29 +1036,35 @@ function mergePresentedTools(current: readonly string[] | undefined, canonical: 
   return [...new Set([...(current ?? []), ...canonical])];
 }
 
-function normalizeUatResultSaveParams(params: UatResultSaveParams): UatResultSaveParams {
+function normalizeUatVerdict(params: UatResultSaveParams): UatResultSaveParams {
   const raw = params as Partial<UatResultSaveParams> & Record<string, unknown>;
-  const normalized = { ...params } as UatResultSaveParams;
   if (typeof raw.verdict === "string") {
-    normalized.verdict = raw.verdict.toUpperCase() as UatVerdict;
+    return { ...params, verdict: raw.verdict.toUpperCase() as UatVerdict };
   }
+  return params;
+}
 
+function supplyDefaultPresentation(params: UatResultSaveParams): UatResultSaveParams {
+  const raw = params as Partial<UatResultSaveParams> & Record<string, unknown>;
+  if (!raw.presentation) {
+    return { ...params, presentation: buildRunUatResultPresentation() };
+  }
+  return params;
+}
+
+function mergeCanonicalPresentation(params: UatResultSaveParams): UatResultSaveParams {
   const canonicalPresentation = buildRunUatResultPresentation();
-  const providedPresentation = raw.presentation as Partial<UatPresentationInput> | undefined;
-  if (!providedPresentation) {
-    normalized.presentation = canonicalPresentation;
-    return normalized;
-  }
-
-  normalized.presentation = {
-    ...providedPresentation,
-    surface: providedPresentation.surface ?? canonicalPresentation.surface,
-    presentedTools: mergePresentedTools(providedPresentation.presentedTools, canonicalPresentation.presentedTools),
-    blockedTools: mergeBlockedTools(providedPresentation.blockedTools, canonicalPresentation.blockedTools),
-    toolPresentationPlanId: RUN_UAT_TOOL_PRESENTATION_PLAN_ID,
-  } as UatPresentationInput;
-
-  return normalized;
+  const providedPresentation = params.presentation as Partial<UatPresentationInput>;
+  return {
+    ...params,
+    presentation: {
+      ...providedPresentation,
+      surface: providedPresentation.surface ?? canonicalPresentation.surface,
+      presentedTools: mergePresentedTools(providedPresentation.presentedTools, canonicalPresentation.presentedTools),
+      blockedTools: mergeBlockedTools(providedPresentation.blockedTools, canonicalPresentation.blockedTools),
+      toolPresentationPlanId: RUN_UAT_TOOL_PRESENTATION_PLAN_ID,
+    } as UatPresentationInput,
+  };
 }
 
 function ensureUatRequiredFields(params: UatResultSaveParams): string | null {
@@ -1371,14 +1377,23 @@ export async function executeUatResultSave(
   const unitGuard = blockIfWrongAutoUnit("run-uat", "save_uat_result");
   if (unitGuard) return unitGuard;
 
-  params = normalizeUatResultSaveParams(params);
+  // Phase 1: normalize verdict and supply the canonical presentation when none was provided.
+  params = normalizeUatVerdict(params);
+  params = supplyDefaultPresentation(params);
+
   const dbAvailable = await ensureDbOpen(basePath);
   if (!dbAvailable) return errorResult("save_uat_result", "GSD database is not available.", "db_unavailable");
 
+  // Phase 2: validate the submitted presentation before the canonical merge so that
+  // presentations missing required workflow tools are rejected rather than silently patched.
   const requiredError = ensureUatRequiredFields(params);
   if (requiredError) return errorResult("save_uat_result", requiredError, "invalid_params");
   const presentationError = validateCanonicalPresentation(params);
   if (presentationError) return errorResult("save_uat_result", presentationError, "alias_tool_name");
+
+  // Phase 3: merge in the canonical plan ID and read-only audit tools so the persisted
+  // artifact always carries the full audit surface even when the provider omitted them.
+  params = mergeCanonicalPresentation(params);
   const checkError = validateUatChecks(basePath, params);
   if (checkError) return errorResult("save_uat_result", checkError, "invalid_evidence");
   const freshEvidenceError = validateFreshUatOwnedEvidence(params);
