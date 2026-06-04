@@ -177,4 +177,34 @@ describe("guided-flow STATE.md rebuild (#3475)", () => {
     );
     clearPendingAutoStart(base);
   });
+
+  test("checkAutoStartAfterDiscuss does not double-notify on 4th+ call after recovery limit", () => {
+    base = createFixtureBase();
+    openDatabase(":memory:");
+    const db = _getAdapter();
+    assert.ok(db, "database should be open");
+    db.exec("DROP TABLE milestones");
+    db.exec("CREATE TABLE milestones (id TEXT PRIMARY KEY)");
+
+    writeFile(base, "milestones/M001/M001-CONTEXT.md", "# M001: Planned\n");
+    writeFile(base, "STATE.md", "# GSD State\n\n**Active Milestone:** M001: Planned\n");
+
+    const notifications: Array<{ message: string; level: string }> = [];
+    const ctx = {
+      ui: { notify: (message: string, level: string) => notifications.push({ message, level }) },
+      waitForIdle: () => new Promise<void>(() => {}),
+    };
+    setPendingAutoStart(base, { basePath: base, milestoneId: "M001", ctx: ctx as any, pi: {} as any });
+
+    for (let i = 0; i < 5; i += 1) {
+      assert.equal(checkAutoStartAfterDiscuss(), false);
+    }
+
+    assert.equal(
+      notifications.filter(n => n.level === "error" && n.message.includes("DB row recovery failed")).length,
+      1,
+      "user must see exactly one error notification even after repeated calls past the recovery limit",
+    );
+    clearPendingAutoStart(base);
+  });
 });

@@ -408,9 +408,8 @@ function ensureMilestoneRowForAcceptedHandoff(
     logWarning(
       "guided",
       `R3b: milestone ${milestoneId} DB-row recovery limit reached ` +
-      `(${entry.r3bRecoveryCount}/${MAX_DB_ROW_RECOVERIES}); escalating to user`,
+      `(${entry.r3bRecoveryCount}/${MAX_DB_ROW_RECOVERIES}); user already notified`,
     );
-    notifyDbRowRecoveryFailed(entry);
     return false;
   }
 
