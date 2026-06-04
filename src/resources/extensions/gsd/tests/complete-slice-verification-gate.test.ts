@@ -170,23 +170,31 @@ describe('complete-slice verification gate (#3580)', () => {
       basePath,
     );
     assert.ok('error' in result, 'expected handler to reject a browser UAT mislabeled artifact-driven');
-    assert.match((result as { error: string }).error, /browser-capable mode|browser-executable/i);
+    assert.match((result as { error: string }).error, /requires browser verification/i);
   });
 
-  test('rejects a runtime-executable UAT that navigates to a localhost URL', async () => {
+  test('allows a runtime-executable UAT that runs a browser test command (playwright)', async () => {
+    // Bugbot regression: runtime-executable legitimately drives a browser via a
+    // command captured by gsd_uat_exec — it must not be pushed to gsd-browser.
     const body = [
       '## UAT Type',
       '- UAT mode: runtime-executable',
       '',
       '## Test Cases',
-      '1. Navigate to http://localhost:3000 and verify the dashboard renders.',
+      '1. Run `npx playwright test` and confirm a passing exit code; capture a screenshot artifact.',
+      '2. Hit http://localhost:3000/health and assert a 200 response.',
     ].join('\n');
     const result = await handleCompleteSlice(
       makeParams({ uatContent: body }),
       basePath,
     );
-    assert.ok('error' in result, 'expected handler to reject a browser UAT mislabeled runtime-executable');
-    assert.match((result as { error: string }).error, /browser-capable mode|browser-executable/i);
+    if ('error' in result) {
+      assert.doesNotMatch(
+        result.error,
+        /artifact-driven|browser-capable|browser verification/i,
+        `runtime-executable command UATs must not be gated, got: ${result.error}`,
+      );
+    }
   });
 
   test('allows an artifact-driven UAT that only disclaims browser coverage (no false positive)', async () => {
@@ -206,7 +214,7 @@ describe('complete-slice verification gate (#3580)', () => {
     if ('error' in result) {
       assert.doesNotMatch(
         result.error,
-        /browser-capable mode/i,
+        /requires browser verification/i,
         `disclaimer-only mention must not trip the browser gate, got: ${result.error}`,
       );
     }
@@ -229,7 +237,7 @@ describe('complete-slice verification gate (#3580)', () => {
     if ('error' in result) {
       assert.doesNotMatch(
         result.error,
-        /browser-capable mode/i,
+        /requires browser verification/i,
         `non-web "navigate" must not trip the browser gate, got: ${result.error}`,
       );
     }
@@ -244,7 +252,7 @@ describe('complete-slice verification gate (#3580)', () => {
     if ('error' in result) {
       assert.doesNotMatch(
         result.error,
-        /browser-capable mode/i,
+        /requires browser verification/i,
         `browser-executable UAT must pass the browser gate, got: ${result.error}`,
       );
     }
@@ -259,7 +267,7 @@ describe('complete-slice verification gate (#3580)', () => {
     if ('error' in result) {
       assert.doesNotMatch(
         result.error,
-        /browser-capable mode/i,
+        /requires browser verification/i,
         `mixed UAT must pass the browser gate, got: ${result.error}`,
       );
     }

@@ -356,11 +356,17 @@ export async function handleCompleteSlice(
   // and milestone validation): it skips Not-Proven/Out-of-Scope disclaimer
   // sections and only treats verbs like navigate/open as web when they sit next
   // to browser/page/localhost — avoiding false positives on CLI/file/API steps.
-  const NON_BROWSER_UAT_MODES = new Set(["artifact-driven", "runtime-executable"]);
+  //
+  // Only `artifact-driven` is gated. It is the one mode that performs no
+  // execution at all (static/file checks), so a browser-requiring UAT under it
+  // genuinely defers verification to a human. Every other mode has a real
+  // verification path: `runtime-executable` runs browser test commands like
+  // `npx playwright test` via gsd_uat_exec, and live-runtime/mixed/
+  // browser-executable receive gsd-browser tools (BROWSER_INCLUSIVE_UAT_TYPES).
   const declaredUatMode = extractUatType(params.uatContent || "") ?? "artifact-driven";
-  if (NON_BROWSER_UAT_MODES.has(declaredUatMode) && hasBrowserRequiredText(params.uatContent || "")) {
+  if (declaredUatMode === "artifact-driven" && hasBrowserRequiredText(params.uatContent || "")) {
     return {
-      error: `UAT describes browser/web interaction (opening a page in a browser, navigating to a page or localhost) but declares non-browser mode "${declaredUatMode}". A webpage/site/app UAT must use a browser-capable mode so gsd-browser launches automatically — set "UAT mode: browser-executable" (or a browser-inclusive "mixed"/"live-runtime") and include at least one concrete browser check. Re-author the UAT Type section and complete the slice again.`,
+      error: `UAT requires browser verification (opening a page in a browser, navigating to a page or localhost, screenshots) but declares "UAT mode: artifact-driven", which only runs static/file checks and would defer the browser work to a human. Use a mode that actually verifies the UI: "browser-executable" (interactive gsd-browser), "runtime-executable" (a browser test command such as playwright), or a browser-inclusive "mixed"/"live-runtime". Re-author the UAT Type section and complete the slice again.`,
     };
   }
 
