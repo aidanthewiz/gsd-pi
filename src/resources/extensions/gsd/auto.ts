@@ -2201,6 +2201,9 @@ export function createWiredDispatchAdapter(
         sessionContextWindow,
         sessionProvider,
         modelRegistry,
+        activeTools,
+        sessionAuthMode: authMode,
+        sessionBaseUrl: ctx.model?.baseUrl,
       });
 
       if (action.action === "stop") {
