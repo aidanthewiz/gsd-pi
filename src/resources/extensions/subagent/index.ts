@@ -341,6 +341,7 @@ interface TaskParam {
 	task: string;
 	cwd?: string;
 	model?: string;
+	thinking?: string;
 	context?: SubagentContextMode;
 }
 
