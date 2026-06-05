@@ -36,6 +36,7 @@ import { registerAutoWorker } from "../db/auto-workers.js";
 import { claimMilestoneLease } from "../db/milestone-leases.js";
 import { recordDispatchClaim, markCanceled } from "../db/unit-dispatches.js";
 import { setRuntimeKv, getRuntimeKv } from "../db/runtime-kv.js";
+import { SourceObservationStore } from "../source-observations.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1102,6 +1103,7 @@ function makeLoopSession(overrides?: Partial<Record<string, unknown>>) {
     currentMilestoneId: "M001",
     currentUnit: null,
     currentUnitRouting: null,
+    sourceObservations: new SourceObservationStore(),
     completedUnits: [],
     resourceVersionOnStart: null,
     lastPromptCharCount: undefined,
@@ -1126,9 +1128,20 @@ function makeLoopSession(overrides?: Partial<Record<string, unknown>>) {
       newSession: () => Promise.resolve({ cancelled: false }),
       getContextUsage: () => ({ percent: 10, tokens: 1000, limit: 10000 }),
     },
+    setCurrentUnit(this: any, unit: any) {
+      this.currentUnit = unit;
+      this.sourceObservations.beginUnit({
+        unitType: unit.type,
+        unitId: unit.id,
+        startedAt: unit.startedAt,
+        basePath: unit.workspaceRoot ?? this.basePath,
+      });
+    },
+    clearCurrentUnit(this: any) {
+      this.currentUnit = null;
+      this.sourceObservations.clear();
+    },
     clearTimers: () => {},
-    setCurrentUnit(unit: any) { (this as any).currentUnit = unit; },
-    clearCurrentUnit() { (this as any).currentUnit = null; },
     ...overrides,
   } as any;
 }
