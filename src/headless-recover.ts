@@ -63,7 +63,9 @@ async function loadExtensionModules() {
     invalidateStateCache: stateModule.invalidateStateCache as () => void,
     countDbHierarchy: migrationCheckModule.countDbHierarchy as () => Counts,
     countMarkdownHierarchy: migrationCheckModule.countMarkdownHierarchy as (basePath: string) => Counts,
-    renderAllFromDb: rendererModule.renderAllFromDb as (basePath: string) => Promise<unknown>,
+    recoverWouldDeleteDbRows: migrationCheckModule.recoverWouldDeleteDbRows as (basePath: string) => boolean,
+    renderAllFromDb: rendererModule.renderAllFromDb as (basePath: string) =>
+      Promise<{ rendered: number; skipped: number; errors: string[] }>,
   }
 }
 
@@ -95,19 +97,18 @@ export async function handleRecover(basePath: string): Promise<RecoverResult> {
 
   // Refuse a destructive recover that would delete authoritative DB rows the
   // markdown lacks, unless explicitly allowed. The DB is the source of truth;
-  // re-projecting via rebuild is almost always what's wanted instead.
+  // re-projecting via rebuild is almost always what's wanted instead. The
+  // check is identity-based, so it also catches equal-count divergence (DB S99
+  // vs markdown S01) that a cardinality-only comparison would miss.
   const markdown = modules.countMarkdownHierarchy(basePath)
   const beforeDb = modules.countDbHierarchy()
-  const dataLoss =
-    beforeDb.milestones > markdown.milestones ||
-    beforeDb.slices > markdown.slices ||
-    beforeDb.tasks > markdown.tasks
+  const dataLoss = modules.recoverWouldDeleteDbRows(basePath)
   const allowDataLoss = process.env.GSD_RECOVER_ALLOW_DATA_LOSS === '1'
   if (dataLoss && !allowDataLoss) {
     process.stderr.write(
-      `[headless] recover refused: DB holds ${beforeDb.milestones}M/${beforeDb.slices}S/${beforeDb.tasks}T ` +
-        `but markdown only ${markdown.milestones}M/${markdown.slices}S/${markdown.tasks}T; ` +
-        `recover would delete the extra rows. Set GSD_RECOVER_ALLOW_DATA_LOSS=1 to override, ` +
+      `[headless] recover refused: the DB (${beforeDb.milestones}M/${beforeDb.slices}S/${beforeDb.tasks}T) ` +
+        `holds rows the markdown (${markdown.milestones}M/${markdown.slices}S/${markdown.tasks}T) lacks; ` +
+        `recover would delete them. Set GSD_RECOVER_ALLOW_DATA_LOSS=1 to override, ` +
         `or run a DB-to-markdown rebuild instead.\n`,
     )
     return { exitCode: 1 }
@@ -131,11 +132,25 @@ export async function handleRecover(basePath: string): Promise<RecoverResult> {
   modules.invalidateStateCache()
 
   // Re-project markdown from the freshly imported DB so disk and DB agree.
+  // renderAllFromDb resolves even when individual artifacts fail, so inspect
+  // its error list — a silent projection failure must surface, not pass as a
+  // clean recover.
+  let projectionErrors = 0
   try {
-    await modules.renderAllFromDb(basePath)
+    const renderResult = await modules.renderAllFromDb(basePath)
+    projectionErrors = renderResult.errors.length
+    if (projectionErrors > 0) {
+      process.stderr.write(
+        `[headless] recover: ${projectionErrors} markdown projection(s) failed to render — markdown may be stale:\n`,
+      )
+      for (const e of renderResult.errors.slice(0, 10)) {
+        process.stderr.write(`  - ${e}\n`)
+      }
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     process.stderr.write(`[headless] recover: re-render after import failed: ${msg}\n`)
+    projectionErrors = 1
   }
 
   if (
@@ -153,7 +168,8 @@ export async function handleRecover(basePath: string): Promise<RecoverResult> {
   }
 
   process.stderr.write(
-    `gsd-recover: recovered ${counts.milestones}M/${counts.slices}S/${counts.tasks}T hierarchy\n`,
+    `gsd-recover: recovered ${counts.milestones}M/${counts.slices}S/${counts.tasks}T hierarchy` +
+      `${projectionErrors > 0 ? ` (${projectionErrors} projection error(s) — run rebuild markdown)` : ''}\n`,
   )
   return { exitCode: 0 }
 }

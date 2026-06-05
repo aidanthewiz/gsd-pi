@@ -67,6 +67,31 @@ function scanIdentitiesMatch(a: HierarchyScan, b: HierarchyScan): boolean {
   );
 }
 
+/** True if any element of `a` is absent from `b`. */
+function hasExtra(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  for (const value of a) if (!b.has(value)) return true;
+  return false;
+}
+
+function scanHasExtraIdentities(a: HierarchyScan, b: HierarchyScan): boolean {
+  return (
+    hasExtra(a.milestones, b.milestones) ||
+    hasExtra(a.slices, b.slices) ||
+    hasExtra(a.tasks, b.tasks)
+  );
+}
+
+/**
+ * True when the DB holds any milestone/slice/task identity the markdown lacks —
+ * i.e. a `/gsd recover --confirm` (markdown → DB) would DELETE authoritative DB
+ * rows. This is identity-based, so it catches equal-count divergence (e.g. DB
+ * slice `S99` vs markdown `S01`) that a cardinality-only check misses. Used by
+ * the recover data-loss guard.
+ */
+export function recoverWouldDeleteDbRows(basePath: string): boolean {
+  return scanHasExtraIdentities(scanDbHierarchy(), scanMarkdownHierarchy(basePath));
+}
+
 export function scanMarkdownHierarchy(basePath: string): HierarchyScan {
   const root = milestonesDir(basePath);
   if (!existsSync(root)) return emptyScan();
@@ -169,26 +194,21 @@ export async function checkMarkdownHierarchyAgainstDb(
     return { action: "none", reason: "in-sync", markdown, beforeDb, afterDb: beforeDb };
   }
 
-  // Choose the SAFE repair direction. Recover imports markdown → DB and DELETES
-  // DB rows markdown lacks, so it must never be recommended when the DB is the
-  // richer side. When the DB holds rows markdown is missing, the correct repair
-  // is to re-project markdown from the DB (rebuild), never recover.
-  const dbRicher =
-    beforeDb.milestones > markdown.milestones ||
-    beforeDb.slices > markdown.slices ||
-    beforeDb.tasks > markdown.tasks;
-  const markdownRicher =
-    markdown.milestones > beforeDb.milestones ||
-    markdown.slices > beforeDb.slices ||
-    markdown.tasks > beforeDb.tasks;
+  // Choose the SAFE repair direction by IDENTITY, not cardinality. Recover
+  // imports markdown → DB and DELETES any DB row markdown lacks, so it must
+  // never be recommended when the DB holds identities the markdown is missing —
+  // including equal-count divergence (DB `S99` vs markdown `S01`), which a
+  // count-only check would wrongly route to recover. Whenever the DB holds rows
+  // markdown lacks, the correct repair is to re-project from the DB (rebuild).
+  const dbHasExtra = scanHasExtraIdentities(dbScan, markdownScan);
 
   const countsLine =
     `Markdown planning artifacts (${markdown.milestones}M/${markdown.slices}S/${markdown.tasks}T) ` +
     `do not match the authoritative DB (${beforeDb.milestones}M/${beforeDb.slices}S/${beforeDb.tasks}T). `;
 
-  // DB is the source of truth and holds more than markdown (or markdown is
+  // The DB holds rows markdown lacks (richer, identity-diverged, or markdown
   // entirely missing): re-project from the DB. Recover here would destroy data.
-  if (dbRicher && !markdownRicher) {
+  if (dbHasExtra) {
     return {
       action: "recovery-required",
       reason: markdownEmpty ? "markdown-missing" : "count-mismatch",

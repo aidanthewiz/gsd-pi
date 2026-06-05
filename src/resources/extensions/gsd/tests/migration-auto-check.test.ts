@@ -197,6 +197,27 @@ test("migration auto-check detects identity drift even when counts match", async
     assert.notEqual(result.reason, "in-sync");
     assert.deepEqual(result.markdown, { milestones: 1, slices: 1, tasks: 1 });
     assert.deepEqual(result.beforeDb, { milestones: 1, slices: 1, tasks: 1 });
+    // The DB holds S99 (which markdown lacks), so recover would DELETE it. Even
+    // at equal counts the safe recommendation must be rebuild, not recover.
+    assert.equal(result.recoveryCommand, "/gsd rebuild markdown");
+    assert.match(result.message ?? "", /Do NOT run/);
+  } finally {
+    cleanup(base);
+  }
+});
+
+test("recoverWouldDeleteDbRows flags identity drift the markdown lacks (even at equal counts)", async () => {
+  const base = makeBase();
+  try {
+    await writeGSDDirectory(projectFixture(), base); // markdown: M001 / S01 / T01
+    assert.equal(await ensureDbOpen(base), true);
+    // DB row identity (S99) differs from markdown (S01) at the same count.
+    insertMilestone({ id: "M001", title: "Legacy Milestone", status: "active" });
+    insertSlice({ id: "S99", milestoneId: "M001", title: "Other Slice", status: "pending", risk: "medium", depends: [], demo: "d", sequence: 1 });
+    insertTask({ id: "T01", sliceId: "S99", milestoneId: "M001", title: "Legacy Task", status: "pending" });
+
+    const { recoverWouldDeleteDbRows } = await import("../migration-auto-check.ts");
+    assert.equal(recoverWouldDeleteDbRows(base), true, "DB S99 is absent from markdown — recover would delete it");
   } finally {
     cleanup(base);
   }
