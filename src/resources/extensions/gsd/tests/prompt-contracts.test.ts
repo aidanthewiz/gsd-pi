@@ -83,7 +83,7 @@ test("run-uat prompt gives the complete UAT result-save presentation contract", 
   );
 });
 
-test("browser-executable UAT presentation uses direct managed browser tools", () => {
+test("browser-executable UAT presentation uses direct browser tools", () => {
   const presentation = buildRunUatPresentationForType("browser-executable");
 
   assert.equal(presentation.surface, "hybrid");
@@ -93,7 +93,7 @@ test("browser-executable UAT presentation uses direct managed browser tools", ()
   assert.ok(!presentation.presentedTools.some((toolName) => toolName.startsWith("mcp__gsd-browser__")));
 });
 
-test("live-runtime and mixed UAT presentations also surface gsd-browser tools", () => {
+test("live-runtime and mixed UAT presentations also surface browser tools", () => {
   // Regression (M001/S03): the run-uat prompt tells live-runtime and mixed to
   // drive a browser, so the runner must actually receive the browser tools and
   // a hybrid surface — otherwise live checks silently downgrade to NEEDS-HUMAN.

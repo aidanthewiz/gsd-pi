@@ -191,10 +191,9 @@ function isWarmUpDisabled(): boolean {
 }
 
 /**
- * Auto-initialize the managed gsd-browser engine when the project under
- * development is a web app, so browser UAT tools are connected and ready instead
- * of failing lazily on first use. Best-effort and non-blocking: warm-up runs in
- * the background and only surfaces a warning if it fails.
+ * Auto-initialize the managed gsd-browser engine only when explicitly selected
+ * for a web app. Best-effort and non-blocking: warm-up runs in the background
+ * and only surfaces a warning if it fails.
  */
 function maybeWarmUpManagedEngine(pi: ExtensionAPI, ctx: ExtensionContext): void {
   if (isWarmUpDisabled()) return;

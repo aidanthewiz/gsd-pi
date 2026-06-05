@@ -346,9 +346,9 @@ export async function handleCompleteSlice(
   // ── Browser/web UAT classification gate ────────────────────────────────
   // A UAT that drives a running web UI (opening a page in a browser,
   // navigating to a page/localhost) must declare a browser-capable mode so the
-  // run-uat runner surfaces gsd-browser and actually launches it. Otherwise the
-  // browser checks get silently deferred to a human and the slice passes on
-  // static checks alone (M001/S03 regression). `browser-executable`,
+  // run-uat runner surfaces browser tools and actually launches a browser.
+  // Otherwise the browser checks get silently deferred to a human and the slice
+  // passes on static checks alone (M001/S03 regression). `browser-executable`,
   // `live-runtime`, and `mixed` all receive browser tools (see
   // BROWSER_INCLUSIVE_UAT_TYPES); only the non-browser modes are rejected here.
   //
@@ -362,11 +362,11 @@ export async function handleCompleteSlice(
   // genuinely defers verification to a human. Every other mode has a real
   // verification path: `runtime-executable` runs browser test commands like
   // `npx playwright test` via gsd_uat_exec, and live-runtime/mixed/
-  // browser-executable receive gsd-browser tools (BROWSER_INCLUSIVE_UAT_TYPES).
+  // browser-executable receive browser tools (BROWSER_INCLUSIVE_UAT_TYPES).
   const declaredUatMode = extractUatType(params.uatContent || "") ?? "artifact-driven";
   if (declaredUatMode === "artifact-driven" && hasBrowserRequiredText(params.uatContent || "")) {
     return {
-      error: `UAT requires browser verification (opening a page in a browser, navigating to a page or localhost, screenshots) but declares "UAT mode: artifact-driven", which only runs static/file checks and would defer the browser work to a human. Use a mode that actually verifies the UI: "browser-executable" (interactive gsd-browser), "runtime-executable" (a browser test command such as playwright), or a browser-inclusive "mixed"/"live-runtime". Re-author the UAT Type section and complete the slice again.`,
+      error: `UAT requires browser verification (opening a page in a browser, navigating to a page or localhost, screenshots) but declares "UAT mode: artifact-driven", which only runs static/file checks and would defer the browser work to a human. Use a mode that actually verifies the UI: "browser-executable" (interactive browser tools), "runtime-executable" (a browser test command such as playwright), or a browser-inclusive "mixed"/"live-runtime". Re-author the UAT Type section and complete the slice again.`,
     };
   }
 

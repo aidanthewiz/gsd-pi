@@ -723,7 +723,7 @@ test('(u) run-uat prompt promotes artifact-driven browser specs to browser-execu
 
       assert.match(prompt, /\*\*Detected UAT mode:\*\*\s*`browser-executable`/);
       assert.match(prompt, /uatType: "browser-executable"/);
-      assert.match(prompt, /use gsd-browser tools/i);
+      assert.match(prompt, /use browser tools/i);
       assert.match(prompt, /"browser_navigate"/);
       assert.match(prompt, /"browser_assert"/);
     } finally {

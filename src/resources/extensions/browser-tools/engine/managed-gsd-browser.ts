@@ -514,9 +514,9 @@ function formatManagedBrowserError(toolName: string, error: unknown): string {
   return [
     `gsd-browser engine or tool unavailable for ${toolName}: ${message}`,
     "",
-    "GSD browser automation now uses the managed gsd-browser engine by default.",
+    "The managed gsd-browser engine is enabled for this session but is unavailable.",
     "Run /gsd doctor or reinstall dependencies so @opengsd/gsd-browser is available.",
-    "Set GSD_BROWSER_ENGINE=legacy only when you intentionally need the Playwright compatibility engine.",
+    "Unset GSD_BROWSER_ENGINE or set GSD_BROWSER_ENGINE=playwright to use the default Playwright engine.",
   ].join("\n");
 }
 

@@ -1,6 +1,6 @@
 export type BrowserEngineMode = "gsd-browser" | "legacy" | "off";
 
-const DEFAULT_BROWSER_ENGINE: BrowserEngineMode = "gsd-browser";
+const DEFAULT_BROWSER_ENGINE: BrowserEngineMode = "legacy";
 
 export function resolveBrowserEngineMode(env: NodeJS.ProcessEnv = process.env): BrowserEngineMode {
   const raw = env.GSD_BROWSER_ENGINE?.trim();

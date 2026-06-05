@@ -124,10 +124,10 @@ export function buildRunUatCanonicalToolNames(options: { includeBrowserTools?: r
 }
 
 // UAT modes whose run-uat instructions direct the runner to exercise the live
-// app in a browser. These modes receive the gsd-browser tool surface so the
-// runner can actually launch gsd-browser instead of silently deferring browser
-// checks to a human. See run-uat.md automation rules: `browser-executable`,
-// `live-runtime`, and `mixed` are all told to drive a browser/runtime path, and
+// app in a browser. These modes receive the browser tool surface so the runner
+// can actually drive the page instead of silently deferring browser checks to a
+// human. See run-uat.md automation rules: `browser-executable`, `live-runtime`,
+// and `mixed` are all told to drive a browser/runtime path, and
 // `human-experience` is told to capture screenshots. Without this, a webpage
 // UAT classified as anything but `browser-executable` had no browser tools and
 // downgraded its live checks to NEEDS-HUMAN (M001/S03 regression).

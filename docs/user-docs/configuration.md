@@ -126,7 +126,7 @@ If both files exist, server names are merged and the first definition found wins
 
 Use `gsd-browser` when GSD or an external MCP client needs deterministic browser automation, versioned element refs, assertions, screenshots, visual diffs, recordings, or a live human takeover viewer.
 
-For GSD Pi Providers such as Codex and non-Claude harnesses, `@opengsd/gsd-browser` is bundled with GSD and used as the default managed browser engine. External MCP clients use a project MCP entry instead. The easiest way to write that entry is:
+For GSD Pi Providers such as Codex and non-Claude harnesses, browser tools are backed by Playwright by default. `@opengsd/gsd-browser` remains bundled for External MCP Clients and for explicit managed-engine opt-in. The easiest way to write the external MCP entry is:
 
 ```bash
 /gsd mcp init
@@ -145,7 +145,7 @@ If you prefer to maintain the MCP entry manually, add:
 }
 ```
 
-Keep this in `.gsd/mcp.json` when browser paths, vault settings, or session state are machine-local. Use `.mcp.json` only when the team should share the same server entry. Set `GSD_BROWSER_MCP_ENABLED=0` only to skip writing the external MCP entry; it does not disable GSD's managed browser engine. Use `GSD_BROWSER_ENGINE=legacy` for the Playwright compatibility engine or `GSD_BROWSER_ENGINE=off` to disable GSD-managed Pi browser tools.
+Keep this in `.gsd/mcp.json` when browser paths, vault settings, or session state are machine-local. Use `.mcp.json` only when the team should share the same server entry. Set `GSD_BROWSER_MCP_ENABLED=0` only to skip writing the external MCP entry; it does not disable Pi browser tools. Use `GSD_BROWSER_ENGINE=gsd-browser` for the managed engine, `GSD_BROWSER_ENGINE=playwright` or `legacy` for the default Playwright engine, or `GSD_BROWSER_ENGINE=off` to disable Pi browser tools.
 
 ### Example: HTTP server
 

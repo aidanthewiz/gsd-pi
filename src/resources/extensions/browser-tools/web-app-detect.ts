@@ -1,14 +1,13 @@
 /**
  * web-app-detect — lightweight, synchronous heuristic for deciding whether the
- * project under development is a web app. Used to decide whether to proactively
- * warm up the managed gsd-browser engine at session start so browser UAT tools
- * are ready instead of failing lazily on first use.
+ * project under development is a web app. Used only when the optional managed
+ * gsd-browser engine is selected and can be warmed before first use.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 // Frontend frameworks / bundlers whose presence in dependencies indicates a
-// browser-facing web app worth warming the browser engine for.
+// browser-facing web app worth warming the optional managed engine for.
 const WEB_DEPENDENCY_RE =
   /^(react|react-dom|next|nuxt|vue|@vue\/|svelte|@sveltejs\/|solid-js|astro|@remix-run\/|gatsby|preact|@angular\/core|vite|@vitejs\/|@builder\.io\/qwik|@web\/dev-server|@11ty\/eleventy)/;
 

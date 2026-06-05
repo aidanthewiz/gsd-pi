@@ -737,13 +737,13 @@ test("executeUatResultSave supplies direct browser tools for browser-executable 
       verdict: "PASS",
       checks: [{
         id: "UAT-01",
-        description: "Browser flow used managed gsd-browser tools",
+        description: "Browser flow used browser tools",
         mode: "browser",
         result: "PASS",
         evidence: [{ kind: "gsd_uat_exec", ref: evidenceId }],
         notes: "Browser check passed.",
       }],
-      notes: "UAT passed with managed browser evidence.",
+      notes: "UAT passed with browser evidence.",
     } as unknown as Parameters<typeof executeUatResultSave>[0], worktree));
 
     assert.equal(result.isError, undefined);
