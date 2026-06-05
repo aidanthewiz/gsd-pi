@@ -497,7 +497,7 @@ function beginSourceObservationStoreForCurrentUnit(
     unitType: dash.currentUnit.type,
     unitId: dash.currentUnit.id,
     startedAt: dash.currentUnit.startedAt,
-    basePath: dash.basePath || contextBasePath(ctx),
+    basePath: dash.currentUnit.workspaceRoot ?? (dash.basePath || contextBasePath(ctx)),
   });
   return store;
 }
@@ -1477,10 +1477,12 @@ export function registerHooks(
     } catch { /* non-fatal */ }
 
     try {
-      const sourceContextBlock = getSourceObservationStore().renderActiveBlock();
-      if (sourceContextBlock) {
-        const nextPayload = injectSourceContextBlockIntoPayload(payload, sourceContextBlock);
-        Object.assign(payload, nextPayload);
+      if (isAutoActive()) {
+        const sourceContextBlock = getSourceObservationStore().renderActiveBlock();
+        if (sourceContextBlock) {
+          const nextPayload = injectSourceContextBlockIntoPayload(payload, sourceContextBlock);
+          Object.assign(payload, nextPayload);
+        }
       }
     } catch { /* non-fatal */ }
 
