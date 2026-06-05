@@ -223,6 +223,33 @@ test("recoverWouldDeleteDbRows flags identity drift the markdown lacks (even at 
   }
 });
 
+test("migration auto-check canonicalizes a legacy descriptor milestone dir (no false drift)", async () => {
+  const base = makeBase();
+  try {
+    await writeGSDDirectory(projectFixture(), base); // creates .gsd/milestones/M001
+    // Rename the dir to a legacy descriptor form while the DB id stays "M001".
+    // scanMarkdownHierarchy must canonicalize "M001-old" → "M001" so the
+    // identity sets line up with scanDbHierarchy (which uses milestone.id).
+    const milestonesRoot = join(base, ".gsd", "milestones");
+    renameSync(join(milestonesRoot, "M001"), join(milestonesRoot, "M001-old"));
+
+    assert.equal(await ensureDbOpen(base), true);
+    insertMilestone({ id: "M001", title: "Legacy Milestone", status: "active" });
+    insertSlice({ id: "S01", milestoneId: "M001", title: "Legacy Slice", status: "pending", risk: "medium", depends: [], demo: "Legacy slice demo", sequence: 1 });
+    insertTask({ id: "T01", sliceId: "S01", milestoneId: "M001", title: "Legacy Task", status: "pending" });
+
+    const result = await checkMarkdownHierarchyAgainstDb(base);
+    // Must be in-sync: the raw dir name "M001-old" would otherwise mismatch the
+    // DB id "M001" and be flagged as false drift.
+    assert.equal(result.action, "none");
+    assert.equal(result.reason, "in-sync");
+    assert.deepEqual(result.markdown, { milestones: 1, slices: 1, tasks: 1 });
+    assert.deepEqual(result.beforeDb, { milestones: 1, slices: 1, tasks: 1 });
+  } finally {
+    cleanup(base);
+  }
+});
+
 test("migration auto-check refreshes a stale open DB handle before comparing", async () => {
   const base = makeBase();
   try {

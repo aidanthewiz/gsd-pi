@@ -99,23 +99,29 @@ export function scanMarkdownHierarchy(basePath: string): HierarchyScan {
   const scan = emptyScan();
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     if (!entry.isDirectory() || !/^M\d+/.test(entry.name)) continue;
+    // Use the CANONICAL milestone id (e.g. "M001" or "M001-a1b2c3"), matching
+    // scanDbHierarchy's milestone.id — not the raw directory name, which may
+    // carry a legacy descriptor (e.g. "M001-some-descriptor"). The canonical id
+    // both keys the identity sets AND resolves files correctly: resolveFile's
+    // prefix/legacy-pattern matching handles the descriptor dir either way.
+    const milestoneId = entry.name.match(/^(M\d+(?:-[a-z0-9]{6})?)/)?.[1] ?? entry.name;
     scan.counts.milestones++;
-    scan.milestones.add(entry.name);
+    scan.milestones.add(milestoneId);
 
-    const roadmapPath = resolveMilestoneFile(basePath, entry.name, "ROADMAP");
+    const roadmapPath = resolveMilestoneFile(basePath, milestoneId, "ROADMAP");
     if (!roadmapPath || !existsSync(roadmapPath)) continue;
 
     const roadmap = parseRoadmap(readFileSync(roadmapPath, "utf-8"));
     scan.counts.slices += roadmap.slices.length;
 
     for (const slice of roadmap.slices) {
-      scan.slices.add(`${entry.name}/${slice.id}`);
-      const planPath = resolveSliceFile(basePath, entry.name, slice.id, "PLAN");
+      scan.slices.add(`${milestoneId}/${slice.id}`);
+      const planPath = resolveSliceFile(basePath, milestoneId, slice.id, "PLAN");
       if (!planPath || !existsSync(planPath)) continue;
       const plan = parsePlan(readFileSync(planPath, "utf-8"));
       scan.counts.tasks += plan.tasks.length;
       for (const task of plan.tasks) {
-        scan.tasks.add(`${entry.name}/${slice.id}/${task.id}`);
+        scan.tasks.add(`${milestoneId}/${slice.id}/${task.id}`);
       }
     }
   }
