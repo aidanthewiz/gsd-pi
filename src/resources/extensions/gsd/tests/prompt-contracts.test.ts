@@ -10,6 +10,14 @@ import {
   RUN_UAT_TOOL_PRESENTATION_PLAN_ID,
   RUN_UAT_WORKFLOW_TOOL_NAMES,
 } from "../tool-presentation-plan.ts";
+import {
+  buildMinimalAutoGsdToolSet,
+  MINIMAL_AUTO_BASE_TOOL_NAMES,
+  MINIMAL_GSD_TOOL_NAMES,
+} from "../bootstrap/register-hooks.ts";
+import { shouldBlockAutoUnitToolCall } from "../auto-unit-tool-scope.ts";
+import { UNIT_TOOL_CONTRACTS } from "../unit-tool-contracts.ts";
+import { uatTypeIncludesBrowser } from "../uat-policy.ts";
 
 const promptsDir = join(process.cwd(), "src/resources/extensions/gsd/prompts");
 const templatesDir = join(process.cwd(), "src/resources/extensions/gsd/templates");
@@ -21,6 +29,84 @@ function readPrompt(name: string): string {
 function readTemplate(name: string): string {
   return readFileSync(join(templatesDir, `${name}.md`), "utf-8");
 }
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const registeredPhaseToolNames = [
+  ...new Set([
+    ...MINIMAL_AUTO_BASE_TOOL_NAMES,
+    ...MINIMAL_GSD_TOOL_NAMES,
+    ...Object.values(UNIT_TOOL_CONTRACTS).flatMap((contract) => contract.allowedGsdTools),
+  ]),
+];
+
+const PHASE_PROMPT_TOOL_CALLS: Record<string, readonly string[]> = {
+  "research-milestone": ["gsd_summary_save"],
+  "plan-milestone": [
+    "gsd_milestone_status",
+    "gsd_plan_milestone",
+    "gsd_plan_slice",
+    "gsd_decision_save",
+  ],
+  "research-slice": ["gsd_summary_save"],
+  "plan-slice": ["gsd_reassess_roadmap", "gsd_plan_slice", "gsd_decision_save"],
+  "refine-slice": ["gsd_plan_slice", "gsd_decision_save"],
+  "replan-slice": ["gsd_replan_slice"],
+  "execute-task": ["gsd_task_complete"],
+  "reactive-execute": ["gsd_summary_save"],
+  "complete-slice": [
+    "gsd_exec",
+    "gsd_task_reopen",
+    "gsd_replan_slice",
+    "gsd_requirement_update",
+    "capture_thought",
+    "gsd_slice_complete",
+    "gsd_summary_save",
+  ],
+  "reassess-roadmap": ["gsd_milestone_status", "gsd_reassess_roadmap"],
+  "validate-milestone": ["gsd_milestone_status", "gsd_validate_milestone", "gsd_reassess_roadmap"],
+  "run-uat": ["gsd_uat_exec", "gsd_uat_result_save"],
+  "gate-evaluate": ["gsd_save_gate_result"],
+  "complete-milestone": [
+    "gsd_milestone_status",
+    "gsd_requirement_update",
+    "gsd_summary_save",
+    "capture_thought",
+    "gsd_complete_milestone",
+  ],
+};
+
+test("auto phase prompt tool calls are available in scoped tool surfaces", () => {
+  for (const [unitType, promptTools] of Object.entries(PHASE_PROMPT_TOOL_CALLS)) {
+    const prompt = readPrompt(unitType);
+    const activeTools = buildMinimalAutoGsdToolSet(
+      registeredPhaseToolNames,
+      unitType,
+      registeredPhaseToolNames,
+    );
+
+    for (const toolName of promptTools) {
+      assert.match(
+        prompt,
+        new RegExp(`\\b${escapeRegExp(toolName)}\\b`),
+        `${unitType} prompt should mention ${toolName}`,
+      );
+      assert.ok(
+        activeTools.includes(toolName),
+        `${unitType} prompt mentions ${toolName}, but scoped tools are ${activeTools.join(", ")}`,
+      );
+
+      const scopeResult = shouldBlockAutoUnitToolCall(unitType, toolName);
+      assert.equal(
+        scopeResult.block,
+        false,
+        `${unitType} phase gate blocked ${toolName}: ${scopeResult.reason ?? "unknown reason"}`,
+      );
+    }
+  }
+});
 
 test("reactive-execute prompt keeps task summaries with subagents and avoids batch commits", () => {
   const prompt = readPrompt("reactive-execute");
@@ -83,7 +169,7 @@ test("run-uat prompt gives the complete UAT result-save presentation contract", 
   );
 });
 
-test("browser-executable UAT presentation uses direct managed browser tools", () => {
+test("browser-executable UAT presentation uses direct browser tools", () => {
   const presentation = buildRunUatPresentationForType("browser-executable");
 
   assert.equal(presentation.surface, "hybrid");
@@ -91,6 +177,35 @@ test("browser-executable UAT presentation uses direct managed browser tools", ()
     assert.ok(presentation.presentedTools.includes(toolName), `presentation should include browser tool ${toolName}`);
   }
   assert.ok(!presentation.presentedTools.some((toolName) => toolName.startsWith("mcp__gsd-browser__")));
+});
+
+test("live-runtime and mixed UAT presentations also surface browser tools", () => {
+  // Regression (M001/S03): the run-uat prompt tells live-runtime and mixed to
+  // drive a browser, so the runner must actually receive the browser tools and
+  // a hybrid surface — otherwise live checks silently downgrade to NEEDS-HUMAN.
+  for (const uatType of ["live-runtime", "mixed", "human-experience"] as const) {
+    assert.equal(uatTypeIncludesBrowser(uatType), true, `${uatType} policy should include browser tools`);
+    const presentation = buildRunUatPresentationForType(uatType);
+    assert.equal(presentation.surface, "hybrid", `${uatType} should use the hybrid surface`);
+    for (const toolName of RUN_UAT_BROWSER_TOOL_NAMES) {
+      assert.ok(
+        presentation.presentedTools.includes(toolName),
+        `${uatType} presentation should include browser tool ${toolName}`,
+      );
+    }
+  }
+});
+
+test("artifact-driven and runtime-executable UAT presentations stay browser-free", () => {
+  for (const uatType of ["artifact-driven", "runtime-executable"] as const) {
+    assert.equal(uatTypeIncludesBrowser(uatType), false, `${uatType} policy should stay browser-free`);
+    const presentation = buildRunUatPresentationForType(uatType);
+    assert.equal(presentation.surface, "mcp", `${uatType} should use the mcp surface`);
+    assert.ok(
+      !RUN_UAT_BROWSER_TOOL_NAMES.some((toolName) => presentation.presentedTools.includes(toolName)),
+      `${uatType} presentation should not include browser tools`,
+    );
+  }
 });
 
 test("workflow-start prompt defaults to autonomy instead of per-phase confirmation", () => {
@@ -545,6 +660,12 @@ test("parallel subagent prompts forbid serialized tasks arrays", () => {
       `${name} must show the concrete ${agent} task call shape`,
     );
   }
+});
+
+test("gate-evaluate prompt requires gate result findings field", () => {
+  const prompt = readPrompt("gate-evaluate");
+  assert.match(prompt, /`findings`/);
+  assert.match(prompt, /empty string if none/i);
 });
 
 // ─── Project-shape classifier + 3-or-4-options-with-Other-hatch contract ──

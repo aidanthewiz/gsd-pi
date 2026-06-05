@@ -107,7 +107,7 @@ import {
 } from "./auto-tool-tracking.js";
 import { closeoutUnit } from "./auto-unit-closeout.js";
 import { recoverTimedOutUnit } from "./auto-timeout-recovery.js";
-import { selectAndApplyModel, resolveModelId, clearToolBaseline } from "./auto-model-selection.js";
+import { selectAndApplyModel, resolveModelId, clearToolBaseline, getToolBaselineSnapshot } from "./auto-model-selection.js";
 import { resetRoutingHistory, recordOutcome } from "./routing-history.js";
 import {
   checkPostUnitHooks,
@@ -542,8 +542,26 @@ function handlePausedSessionResumeRecovery(
 ): { skippedReplay: boolean } {
   if (!state.pausedSessionFile) return { skippedReplay: false };
 
-  const pausedRecoveryUnitType = state.currentUnit?.type ?? state.pausedUnitType ?? "unknown";
-  const pausedRecoveryUnitId = state.currentUnit?.id ?? state.pausedUnitId ?? "unknown";
+  const pausedRecoveryUnitType = state.currentUnit?.type ?? state.pausedUnitType ?? null;
+  const pausedRecoveryUnitId = state.currentUnit?.id ?? state.pausedUnitId ?? null;
+
+  // When the paused-session metadata never captured the unit identity (the
+  // pause happened between units, or the worker died before currentUnit was
+  // set), we have nothing to verify against and nothing correct to target. A
+  // replay synthesized with an "unknown" unit re-injects an unbounded,
+  // mis-identified tool-call blob into the fresh resume context — exactly the
+  // thrash that turns one stuck unit into several. Disk state has already been
+  // rebuilt (rebuildState + doctor) before this runs, so skip the replay and
+  // let the normal dispatcher recompute the next unit from disk.
+  if (!pausedRecoveryUnitType || !pausedRecoveryUnitId) {
+    state.pausedSessionFile = null;
+    state.pausedUnitType = null;
+    state.pausedUnitId = null;
+    state.pendingCrashRecovery = null;
+    notify("Paused session had no recorded unit identity. Skipping tool-call replay and resuming from disk state.");
+    return { skippedReplay: true };
+  }
+
   const completedPausedUnit = verifyExpectedArtifact(
     pausedRecoveryUnitType,
     pausedRecoveryUnitId,
@@ -1251,11 +1269,14 @@ export async function cleanupAfterLoopExit(ctx: ExtensionContext): Promise<void>
   // A transient provider-error pause intentionally leaves the paused badge
   // visible so the user still has a resumable auto-mode signal on screen.
   if (!s.paused) {
-    if (preserveStepSurface) {
-      s.preserveStepSurfaceAfterLoopExit = false;
-    } else if (preserveCompletionSurface) {
+    if (preserveCompletionSurface) {
       ctx.ui.setStatus("gsd-auto", undefined);
       s.completionStopInProgress = false;
+      if (preserveStepSurface) {
+        s.preserveStepSurfaceAfterLoopExit = false;
+      }
+    } else if (preserveStepSurface) {
+      s.preserveStepSurfaceAfterLoopExit = false;
     } else {
       ctx.ui.setStatus("gsd-auto", undefined);
       ctx.ui.setWidget("gsd-progress", undefined);
@@ -2154,7 +2175,10 @@ export function createWiredDispatchAdapter(
         sessionProvider && typeof ctx.modelRegistry?.getProviderAuthMode === "function"
           ? ctx.modelRegistry.getProviderAuthMode(sessionProvider)
           : undefined;
-      const activeTools = typeof pi.getActiveTools === "function" ? pi.getActiveTools() : [];
+      // Use baseline snapshot — same reason as phases.ts:runDispatch: the live
+      // active set may be narrowed by the prior unit before selectAndApplyModel
+      // restores it, causing false transport-preflight failures (#477 follow-up).
+      const activeTools = getToolBaselineSnapshot(pi);
       // Mirrors runDispatch: deep-planning keeps approval gates in plain chat
       // because structured questions can be cancelled outside the chat turn on
       // some transports.
@@ -2201,6 +2225,9 @@ export function createWiredDispatchAdapter(
         sessionContextWindow,
         sessionProvider,
         modelRegistry,
+        activeTools,
+        sessionAuthMode: authMode,
+        sessionBaseUrl: ctx.model?.baseUrl,
       });
 
       if (action.action === "stop") {

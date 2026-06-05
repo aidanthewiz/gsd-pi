@@ -48,10 +48,50 @@ test("auto execute-task requires canonical task completion tool", () => {
   assert.deepEqual(getRequiredWorkflowToolsForAutoUnit("execute-task"), ["gsd_task_complete"]);
 });
 
+test("plan-slice requires planning and roadmap reassessment tools", () => {
+  const expected = ["gsd_plan_slice", "gsd_reassess_roadmap"];
+  assert.deepEqual(getRequiredWorkflowToolsForGuidedUnit("plan-slice"), expected);
+  assert.deepEqual(getRequiredWorkflowToolsForAutoUnit("plan-slice"), expected);
+});
+
+test("plan-milestone requires status, roadmap, and single-slice planning tools", () => {
+  const expected = ["gsd_milestone_status", "gsd_plan_milestone", "gsd_plan_slice"];
+  assert.deepEqual(getRequiredWorkflowToolsForGuidedUnit("plan-milestone"), expected);
+  assert.deepEqual(getRequiredWorkflowToolsForAutoUnit("plan-milestone"), expected);
+});
+
+test("refine-slice requires canonical slice planning tool", () => {
+  assert.deepEqual(getRequiredWorkflowToolsForGuidedUnit("refine-slice"), ["gsd_plan_slice"]);
+  assert.deepEqual(getRequiredWorkflowToolsForAutoUnit("refine-slice"), ["gsd_plan_slice"]);
+});
+
 test("complete-slice requires closeout and execution handoff tools", () => {
-  const expected = ["gsd_slice_complete", "gsd_task_reopen", "gsd_replan_slice"];
+  const expected = [
+    "gsd_slice_complete",
+    "gsd_task_reopen",
+    "gsd_replan_slice",
+    "gsd_requirement_update",
+    "gsd_summary_save",
+  ];
   assert.deepEqual(getRequiredWorkflowToolsForGuidedUnit("complete-slice"), expected);
   assert.deepEqual(getRequiredWorkflowToolsForAutoUnit("complete-slice"), expected);
+});
+
+test("complete-milestone requires status, requirement, project refresh, and closeout tools", () => {
+  const expected = [
+    "gsd_milestone_status",
+    "gsd_requirement_update",
+    "gsd_summary_save",
+    "gsd_complete_milestone",
+  ];
+  assert.deepEqual(getRequiredWorkflowToolsForGuidedUnit("complete-milestone"), expected);
+  assert.deepEqual(getRequiredWorkflowToolsForAutoUnit("complete-milestone"), expected);
+});
+
+test("reactive-execute requires task completion and failed-task summary tools", () => {
+  const expected = ["gsd_task_complete", "gsd_summary_save"];
+  assert.deepEqual(getRequiredWorkflowToolsForGuidedUnit("reactive-execute"), expected);
+  assert.deepEqual(getRequiredWorkflowToolsForAutoUnit("reactive-execute"), expected);
 });
 
 test("workflow MCP capability surface includes native legacy gsd aliases", () => {
@@ -679,7 +719,7 @@ test("transport compatibility ignores API-backed providers", () => {
 test("transport compatibility now allows plan-slice over workflow MCP surface", () => {
   const error = getWorkflowTransportSupportError(
     "claude-code",
-    ["gsd_plan_slice"],
+    getRequiredWorkflowToolsForAutoUnit("plan-slice"),
     {
       projectRoot: "/tmp/project",
       env: { GSD_WORKFLOW_MCP_COMMAND: "node" },
@@ -696,7 +736,7 @@ test("transport compatibility now allows plan-slice over workflow MCP surface", 
 test("transport compatibility now allows complete-slice over workflow MCP surface", () => {
   const error = getWorkflowTransportSupportError(
     "claude-code",
-    ["gsd_complete_slice"],
+    getRequiredWorkflowToolsForAutoUnit("complete-slice"),
     {
       projectRoot: "/tmp/project",
       env: { GSD_WORKFLOW_MCP_COMMAND: "node" },
@@ -747,7 +787,7 @@ test("transport compatibility now allows gate-evaluate over workflow MCP surface
 test("transport compatibility now allows validate-milestone over workflow MCP surface", () => {
   const error = getWorkflowTransportSupportError(
     "claude-code",
-    ["gsd_milestone_status", "gsd_validate_milestone"],
+    getRequiredWorkflowToolsForAutoUnit("validate-milestone"),
     {
       projectRoot: "/tmp/project",
       env: { GSD_WORKFLOW_MCP_COMMAND: "node" },
@@ -764,7 +804,7 @@ test("transport compatibility now allows validate-milestone over workflow MCP su
 test("transport compatibility now allows complete-milestone over workflow MCP surface", () => {
   const error = getWorkflowTransportSupportError(
     "claude-code",
-    ["gsd_milestone_status", "gsd_complete_milestone"],
+    getRequiredWorkflowToolsForAutoUnit("complete-milestone"),
     {
       projectRoot: "/tmp/project",
       env: { GSD_WORKFLOW_MCP_COMMAND: "node" },
@@ -795,7 +835,7 @@ test("transport compatibility now allows replan-slice over workflow MCP surface"
   assert.equal(error, null);
 });
 
-test("transport compatibility accepts workflow MCP tools absent from parent active tool surface", () => {
+test("transport compatibility rejects MCP tools not connected in active tool surface", () => {
   const error = getWorkflowTransportSupportError(
     "claude-code",
     ["gsd_summary_save"],
@@ -810,10 +850,10 @@ test("transport compatibility accepts workflow MCP tools absent from parent acti
     },
   );
 
-  assert.equal(error, null);
+  assert.match(error ?? "", /requires gsd_summary_save/);
 });
 
-test("transport compatibility still checks non-MCP tools against parent active tool surface", () => {
+test("transport compatibility checks all required tools against active tool surface", () => {
   const error = getWorkflowTransportSupportError(
     "claude-code",
     ["gsd_summary_save", "secure_env_collect"],
@@ -828,8 +868,9 @@ test("transport compatibility still checks non-MCP tools against parent active t
     },
   );
 
-  assert.match(error ?? "", /requires secure_env_collect/);
-  assert.doesNotMatch(error ?? "", /gsd_summary_save/);
+  assert.match(error ?? "", /requires.*(?:gsd_summary_save|secure_env_collect)/);
+  assert.match(error ?? "", /gsd_summary_save/);
+  assert.match(error ?? "", /secure_env_collect/);
 });
 
 test("transport compatibility still blocks units whose MCP tools are not exposed", () => {
@@ -848,6 +889,32 @@ test("transport compatibility still blocks units whose MCP tools are not exposed
 
   assert.match(error ?? "", /requires secure_env_collect/);
   assert.match(error ?? "", /currently exposes only/);
+});
+
+test("discuss-milestone guided flow does not abort when all required tools are on MCP surface (regression #469)", () => {
+  // Guided flow starts the workflow MCP server as part of dispatch, so the
+  // parent session active-tool list is not authoritative for MCP tools.
+  const discussMilestoneTools = [
+    "gsd_summary_save",
+    "gsd_requirement_save",
+    "gsd_requirement_update",
+    "gsd_plan_milestone",
+    "gsd_milestone_generate_id",
+  ];
+  const error = getWorkflowTransportSupportError(
+    "claude-code",
+    discussMilestoneTools,
+    {
+      projectRoot: "/tmp/project",
+      env: { GSD_WORKFLOW_MCP_COMMAND: "node" },
+      surface: "guided flow",
+      unitType: "discuss-milestone",
+      authMode: "externalCli",
+      baseUrl: "local://claude-code",
+    },
+  );
+
+  assert.equal(error, null);
 });
 
 test("transport compatibility accepts MCP-namespaced runtime tools", () => {

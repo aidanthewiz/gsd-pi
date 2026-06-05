@@ -73,7 +73,7 @@ export function formatMcpInitResult(
     `Config:   ${configPath}`,
     "",
     "MCP-capable clients can now load the GSD workflow and gsd-browser MCP servers from this folder.",
-    "Pi Providers use the managed gsd-browser engine directly; this project config is for External MCP Clients.",
+    "Pi Providers use built-in browser tools directly; this project config is for External MCP Clients.",
     "Restart or reconnect any client that already has this project open.",
   ].join("\n");
 }

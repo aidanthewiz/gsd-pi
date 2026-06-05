@@ -152,35 +152,50 @@ test("ADR-017 (#5700): repair failure throws ReconciliationFailedError with shap
   );
 });
 
-test("ADR-017 (#5700): detector failure throws ReconciliationFailedError with shape", async () => {
-  const handler: DriftHandler = {
-    kind: "stale-sketch-flag",
+test("ADR-017 (#5700): a detector failure degrades to a blocker without aborting other handlers", async () => {
+  // A single detector throwing (e.g. a transient file read error) must NOT
+  // abort the whole cycle and hide every later handler's drift. It is collected
+  // as a blocker (so dispatch is still gated) while the remaining detectors run
+  // and their drift is repaired — graceful degradation, not fail-fast.
+  const throwingHandler: DriftHandler = {
+    kind: "stale-render",
     detect: () => {
       throw new Error("simulated detect failure");
     },
     repair: () => {
-      /* detect fails before repair */
+      /* never reached: detect throws */
     },
   };
 
-  await assert.rejects(
-    () =>
-      reconcileBeforeDispatch("/project", {
-        invalidateStateCache: () => {},
-        deriveState: async () => makeState(),
-        registry: [handler],
-      }),
-    (err: unknown) => {
-      assert.ok(err instanceof ReconciliationFailedError, "must be ReconciliationFailedError");
-      assert.equal(err.failures.length, 1);
-      assert.equal(err.failures[0]?.drift.kind, "stale-sketch-flag");
-      assert.ok(err.failures[0]?.cause instanceof Error);
-      assert.equal((err.failures[0]?.cause as Error).message, "simulated detect failure");
-      assert.equal(err.pass, 0);
-      assert.equal(err.detectionFailures.length, 0);
-      assert.equal(err.persistentDrift.length, 0);
-      return true;
+  let repairCount = 0;
+  const workingHandler: DriftHandler = {
+    kind: "stale-sketch-flag",
+    detect: () =>
+      repairCount === 0
+        ? [{ kind: "stale-sketch-flag", mid: "M001", sid: "S02" }]
+        : [],
+    repair: () => {
+      repairCount++;
     },
+  };
+
+  const result = await reconcileBeforeDispatch("/project", {
+    invalidateStateCache: () => {},
+    deriveState: async () => makeState(),
+    registry: [throwingHandler, workingHandler],
+  });
+
+  assert.equal(result.ok, true, "cycle must not abort on a single detector failure");
+  // The working handler (registered AFTER the thrower) still detected + repaired.
+  assert.equal(repairCount, 1, "later handler must still run despite earlier detect failure");
+  assert.equal(result.repaired.length, 1);
+  assert.equal(result.repaired[0]?.kind, "stale-sketch-flag");
+  // The detector failure surfaces as a blocker so dispatch is still gated.
+  assert.ok(
+    result.blockers.some(
+      (b) => b.includes("stale-render") && b.includes("simulated detect failure"),
+    ),
+    "detect failure must surface as a blocker",
   );
 });
 
@@ -744,6 +759,46 @@ test("ADR-017 (#5702): missing UAT.md clears stale full_uat_md from DB", async (
     false,
     "UAT.md should not be recreated while clearing stale UAT content",
   );
+});
+
+test("ADR-017 (#5702): stale-render plan repair works with descriptor-layout milestone dir", async (t) => {
+  // Regression for bugbot finding: repairStaleRenderFromBasePath was passing the
+  // raw dir segment (e.g. M001-DESCRIPTOR) straight to renderPlanCheckboxes, which
+  // queries the DB as getSliceTasks("M001-DESCRIPTOR", …) → empty → throws.
+  // After the fix it calls canonicalizeMilestoneId() first.
+  const base = mkdtempSync(join(tmpdir(), "gsd-adr017-descriptor-"));
+  // Use a descriptor-style directory name (M001-DESCRIPTOR → DB milestone M001)
+  const milestoneDir = "M001-DESCRIPTOR";
+  const sliceDir = join(base, ".gsd", "milestones", milestoneDir, "slices", "S01");
+  mkdirSync(join(sliceDir, "tasks"), { recursive: true });
+  t.after(() => {
+    try { closeDatabase(); } catch { /* noop */ }
+    rmTreeQuiet(base);
+  });
+
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  clearRendererCaches();
+  // DB uses the canonical ID (M001), directory uses the descriptor name.
+  insertMilestone({ id: "M001", title: "Descriptor Test", status: "active" });
+  insertSlice({ id: "S01", milestoneId: "M001", title: "Slice", status: "pending" });
+  insertTask({ id: "T01", sliceId: "S01", milestoneId: "M001", title: "Task One", status: "done" });
+
+  const planPath = join(sliceDir, "S01-PLAN.md");
+  writeFileSync(planPath, makeStalePlanContent("S01", [
+    { id: "T01", title: "Task One", done: false },
+  ]));
+  clearRendererCaches();
+
+  const result = await reconcileBeforeDispatch(base, {
+    invalidateStateCache: () => {},
+    deriveState: async () => makeState(),
+  });
+
+  assert.equal(result.ok, true, "reconcile should succeed with descriptor-layout milestone dir");
+  const renderRepaired = result.repaired.find((d) => d.kind === "stale-render");
+  assert.ok(renderRepaired, "stale-render drift should be repaired");
+  const repairedContent = readFileSync(planPath, "utf-8");
+  assert.match(repairedContent, /\[x\][^\n]*T01:/, "T01 checkbox should be checked after repair");
 });
 
 // ─── #5703: stale-worker drift ───────────────────────────────────────────────

@@ -10,8 +10,8 @@
  */
 
 import { loadFile, parseContinue, parseSummary, loadActiveOverrides, formatOverridesSection, parseTaskPlanFile } from "./files.js";
-import type { Override, UatType } from "./files.js";
-import { hasVerdict, getUatType, extractVerdict } from "./verdict-parser.js";
+import type { Override } from "./files.js";
+import { hasVerdict, extractVerdict } from "./verdict-parser.js";
 import { loadPrompt, inlineTemplate } from "./prompt-loader.js";
 import {
   resolveMilestoneFile, resolveSliceFile, resolveSlicePath,
@@ -42,11 +42,11 @@ import { logWarning } from "./workflow-logger.js";
 import { inlineGraphSubgraph } from "./graph-context.js";
 import { buildExtractionStepsBlock } from "./commands-extract-learnings.js";
 import { classifyProject, type ProjectClassification } from "./detection.js";
-import { hasBrowserRequiredText } from "./browser-evidence.js";
 import { debugLog } from "./debug-logger.js";
 import { buildSkillActivationBlock, buildSkillDiscoveryVars } from "./skill-activation.js";
 import { findMilestoneIds } from "./milestone-ids.js";
 import { buildRunUatPresentationForType, RUN_UAT_TOOL_PRESENTATION_PLAN_ID } from "./tool-presentation-plan.js";
+import { resolveEffectiveUatType, shouldDispatchUatForContent, type UatType } from "./uat-policy.js";
 
 export { buildSkillActivationBlock, buildSkillDiscoveryVars };
 
@@ -284,19 +284,6 @@ function prependContextModeToBlock(
   if (!contextMode) return block;
   if (!block.trim()) return contextMode;
   return `${contextMode}\n\n${block}`;
-}
-
-function resolveEffectiveUatType(content: string): UatType {
-  const uatType = getUatType(content);
-  if (uatType === "artifact-driven" && hasBrowserRequiredText(content)) {
-    return "browser-executable";
-  }
-  return uatType;
-}
-
-function shouldDispatchUatForContent(content: string, prefs: GSDPreferences | undefined): boolean {
-  const uatType = resolveEffectiveUatType(content);
-  return !!prefs?.uat_dispatch || uatType !== "artifact-driven" || hasBrowserRequiredText(content);
 }
 
 // ─── Executor Constraints ─────────────────────────────────────────────────────
@@ -3543,11 +3530,25 @@ export async function buildReassessRoadmapPrompt(
 
 // ─── Reactive Execute Prompt ──────────────────────────────────────────────
 
+/**
+ * Build the `with model: "…" and thinking: "…"` suffix injected into a prompt
+ * that instructs the coordinator how to dispatch a `subagent` call. Either or
+ * both may be absent (ADR-026 / #508).
+ */
+function subagentCallSuffix(model?: string, thinking?: string): string {
+  const parts: string[] = [];
+  if (model) parts.push(`model: "${model}"`);
+  if (thinking) parts.push(`thinking: "${thinking}"`);
+  return parts.length > 0 ? ` with ${parts.join(" and ")}` : "";
+}
+
 export async function buildReactiveExecutePrompt(
   mid: string, midTitle: string, sid: string, sTitle: string,
   readyTaskIds: string[], base: string,
   subagentModel?: string,
-  opts?: { sessionContextWindow?: number; modelRegistry?: MinimalModelRegistry; sessionProvider?: string },
+  // Reasoning effort travels inside opts here (not as a positional param) so
+  // existing positional `opts` callers don't shift (#508).
+  opts?: { sessionContextWindow?: number; modelRegistry?: MinimalModelRegistry; sessionProvider?: string; subagentThinking?: string },
 ): Promise<string> {
   const { loadSliceTaskIO, deriveTaskGraph, graphMetrics } = await import("./reactive-graph.js");
 
@@ -3640,7 +3641,7 @@ export async function buildReactiveExecutePrompt(
       `When done, say: "Task ${tid} complete."`,
     ].join("\n");
 
-    const modelSuffix = subagentModel ? ` with model: "${subagentModel}"` : "";
+    const modelSuffix = subagentCallSuffix(subagentModel, opts?.subagentThinking);
     subagentSections.push([
       `### ${tid}: ${tTitle}`,
       "",
@@ -3724,10 +3725,11 @@ export async function buildParallelResearchSlicesPrompt(
   slices: Array<{ id: string; title: string }>,
   basePath: string,
   subagentModel?: string,
+  subagentThinking?: string,
 ): Promise<string> {
   // Build individual research-slice prompts for each slice
   const subagentSections: string[] = [];
-  const modelSuffix = subagentModel ? ` with model: "${subagentModel}"` : "";
+  const modelSuffix = subagentCallSuffix(subagentModel, subagentThinking);
   for (const slice of slices) {
     const slicePrompt = await buildResearchSlicePrompt(mid, midTitle, slice.id, slice.title, basePath, { contextModeRenderMode: "nested" });
     subagentSections.push([
@@ -3755,6 +3757,7 @@ export async function buildGateEvaluatePrompt(
   mid: string, midTitle: string, sid: string, sTitle: string,
   base: string,
   subagentModel?: string,
+  subagentThinking?: string,
 ): Promise<string> {
   // Pull only the gates this turn actually owns (Q3/Q4). Filter via the
   // registry so that scope:"slice" gates owned by other turns (Q8) can't
@@ -3811,7 +3814,7 @@ export async function buildGateEvaluatePrompt(
       "- `findings`: detailed markdown findings (or empty if omitted)",
     ].join("\n");
 
-    const modelSuffix = subagentModel ? ` with model: "${subagentModel}"` : "";
+    const modelSuffix = subagentCallSuffix(subagentModel, subagentThinking);
     subagentSections.push([
       `### ${def.id}: ${def.question}`,
       "",

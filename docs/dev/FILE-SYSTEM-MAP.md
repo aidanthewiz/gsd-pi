@@ -15,7 +15,7 @@
 | **Auth / OAuth** | Authentication, OAuth flows, token storage |
 | **Auto Engine** | GSD autonomous execution loop, dispatch, supervision |
 | **Bg Shell** | Background process / interactive shell management |
-| **Browser Tools** | Browser Automation Contract adapter and managed gsd-browser engine integration |
+| **Browser Tools** | Browser Automation Contract adapter backed by Playwright by default, with optional managed gsd-browser integration |
 | **Build System** | Scripts for build, packaging, version management, CI |
 | **CLI** | Command-line entry points and argument parsing |
 | **CMux** | Tmux/multiplexer session integration |

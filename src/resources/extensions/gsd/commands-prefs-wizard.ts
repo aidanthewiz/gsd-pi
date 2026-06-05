@@ -1285,7 +1285,7 @@ async function configureHooks(ctx: ExtensionCommandContext, prefs: Record<string
   if (geEnabled !== undefined) ge.enabled = geEnabled;
   const currentSliceGates = Array.isArray(ge.slice_gates) ? ge.slice_gates as string[] : [];
   const sgInput = await ctx.ui.input(
-    `Slice gates to evaluate (comma-separated, blank keeps)${currentSliceGates.length ? ` (current: ${currentSliceGates.join(", ")})` : " (default: Q3,Q4)"}:`,
+    `Gate-evaluate slice gates (Q3,Q4; comma-separated, blank keeps)${currentSliceGates.length ? ` (current: ${currentSliceGates.join(", ")})` : " (default: Q3,Q4)"}:`,
     currentSliceGates.join(", "),
   );
   if (sgInput !== null && sgInput !== undefined) {
@@ -1751,7 +1751,7 @@ export function serializePreferencesToFrontmatter(prefs: Record<string, unknown>
   // Ordered keys for consistent output
   const orderedKeys = [
     "version", "mode", "always_use_skills", "prefer_skills", "avoid_skills",
-    "skill_rules", "custom_instructions", "models", "skill_discovery",
+    "skill_rules", "custom_instructions", "models", "thinking", "skill_discovery",
     "skill_staleness_days", "auto_supervisor", "uat_dispatch", "unique_milestone_ids",
     "budget_ceiling", "budget_enforcement", "context_pause_threshold",
     "notifications", "cmux", "remote_questions", "git",

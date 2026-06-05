@@ -14,10 +14,21 @@
 
 import type { GSDState } from "./types.js";
 import type { GSDPreferences } from "./preferences.js";
-import type { UatType } from "./files.js";
 import type { MinimalModelRegistry } from "./context-budget.js";
 import { loadFile, extractUatType, loadActiveOverrides } from "./files.js";
-import { isDbAvailable, getMilestoneSlices, getPendingGates, markAllGatesOmitted, getMilestone, insertAssessment, setSliceSketchFlag, transaction, getAssessment } from "./gsd-db.js";
+import { getUatBrowserToolSupportError, type UatType } from "./uat-policy.js";
+import {
+  isDbAvailable,
+  getMilestoneSlices,
+  getPendingGatesForTurn,
+  markPendingGatesOmittedForTurn,
+  getMilestone,
+  insertArtifact,
+  insertAssessment,
+  setSliceSketchFlag,
+  transaction,
+  getAssessment,
+} from "./gsd-db.js";
 import { isClosedStatus } from "./status-guards.js";
 import { extractVerdict, isAcceptableUatVerdict } from "./verdict-parser.js";
 
@@ -67,7 +78,7 @@ import {
   checkNeedsReassessment,
   checkNeedsRunUat,
 } from "./auto-prompts.js";
-import { resolveModelWithFallbacksForUnit } from "./preferences-models.js";
+import { resolveModelWithFallbacksForUnit, resolveThinkingLevelForUnit } from "./preferences-models.js";
 import { resolveUokFlags } from "./uok/flags.js";
 import { selectReactiveDispatchBatch } from "./uok/execution-graph.js";
 import { getMilestonePipelineVariant } from "./milestone-scope-classifier.js";
@@ -76,6 +87,10 @@ import { isAutoActive } from "./auto.js";
 import { markDepthVerified } from "./bootstrap/write-gate.js";
 import { ensureWorkflowPreferencesCaptured } from "./planning-depth.js";
 import { MILESTONE_ID_RE } from "./milestone-ids.js";
+import {
+  getWorkflowTransportSupportError,
+  getRequiredWorkflowToolsForAutoUnit,
+} from "./workflow-mcp.js";
 import {
   PROJECT_RESEARCH_INFLIGHT_MARKER,
 } from "./project-research-policy.js";
@@ -136,6 +151,12 @@ export interface DispatchContext {
   modelRegistry?: MinimalModelRegistry;
   /** Session model provider, used for provider-specific effective context windows. */
   sessionProvider?: string;
+  /** Active tools in the current session, used for transport preflight checks. */
+  activeTools?: string[];
+  /** Session model base URL, used for transport preflight checks. */
+  sessionBaseUrl?: string;
+  /** Session model auth mode, used for transport preflight checks. */
+  sessionAuthMode?: "apiKey" | "oauth" | "externalCli" | "none";
 }
 
 function resolveExistingExpectedArtifact(
@@ -419,6 +440,53 @@ export function findMissingSummaries(basePath: string, mid: string): string[] {
     .map(s => s.id);
 }
 
+function stringField(row: Record<string, unknown> | null, key: string): string | null {
+  const value = row?.[key];
+  return typeof value === "string" ? value : null;
+}
+
+function stripGsdPrefix(path: string): string {
+  return path.startsWith(".gsd/") ? path.slice(".gsd/".length) : path;
+}
+
+function persistSliceAssessmentBackfill(
+  assessmentRelPath: string,
+  mid: string,
+  sliceId: string,
+  content: string,
+): void {
+  const artifactPath = stripGsdPrefix(assessmentRelPath);
+  const existingAssessment =
+    getAssessment(assessmentRelPath) ??
+    getAssessment(artifactPath);
+  const scope = stringField(existingAssessment, "scope") ?? "run-uat";
+  const status = stringField(existingAssessment, "status") ??
+    extractVerdict(content)?.toLowerCase() ??
+    "unknown";
+
+  transaction(() => {
+    insertArtifact({
+      path: artifactPath,
+      artifact_type: "ASSESSMENT",
+      milestone_id: mid,
+      slice_id: sliceId,
+      task_id: null,
+      full_content: content,
+    });
+    if (!getAssessment(assessmentRelPath)) {
+      insertAssessment({
+        path: assessmentRelPath,
+        milestoneId: mid,
+        sliceId,
+        taskId: null,
+        status,
+        scope,
+        fullContent: content,
+      });
+    }
+  });
+}
+
 function backfillMissingAssessmentsFromSummaries(basePath: string, mid: string): void {
   const completedSliceIds = new Set<string>();
   if (isDbAvailable()) {
@@ -447,11 +515,12 @@ function backfillMissingAssessmentsFromSummaries(basePath: string, mid: string):
     const slicePath = resolveSlicePath(basePath, mid, sliceId);
     const assessmentPath = resolveSliceFile(basePath, mid, sliceId, "ASSESSMENT")
       ?? (slicePath ? join(slicePath, buildSliceFileName(sliceId, "ASSESSMENT")) : null);
-    if (!assessmentPath || existsSync(assessmentPath)) continue;
+    if (!assessmentPath) continue;
 
-    mkdirSync(dirname(assessmentPath), { recursive: true });
+    const assessmentRelPath = relSliceFile(basePath, mid, sliceId, "ASSESSMENT");
     const now = new Date().toISOString();
-    const content = [
+    const didCreateAssessment = !existsSync(assessmentPath);
+    const content = didCreateAssessment ? [
       "---",
       `sliceId: ${sliceId}`,
       "verdict: PASS",
@@ -463,8 +532,20 @@ function backfillMissingAssessmentsFromSummaries(basePath: string, mid: string):
       "Auto-created during milestone validation because this completed slice had a SUMMARY but no ASSESSMENT artifact.",
       "No additional reassessment changes were detected in this backfill step.",
       "",
-    ].join("\n");
-    writeFileSync(assessmentPath, content, "utf-8");
+    ].join("\n") : readFileSync(assessmentPath, "utf-8");
+
+    if (isDbAvailable()) {
+      try {
+        persistSliceAssessmentBackfill(assessmentRelPath, mid, sliceId, content);
+      } catch (err) {
+        logWarning("dispatch", `failed to backfill assessment DB rows for ${mid}/${sliceId}: ${(err as Error).message}`);
+      }
+    }
+
+    if (didCreateAssessment) {
+      mkdirSync(dirname(assessmentPath), { recursive: true });
+      writeFileSync(assessmentPath, content, "utf-8");
+    }
   }
 }
 
@@ -653,10 +734,31 @@ export const DISPATCH_RULES: DispatchRule[] = [
   },
   {
     name: "run-uat (post-completion)",
-    match: async ({ state, mid, basePath, prefs }) => {
+    match: async ({ state, mid, basePath, prefs, sessionProvider, sessionAuthMode, activeTools, sessionBaseUrl }) => {
       const needsRunUat = await checkNeedsRunUat(basePath, mid, state, prefs);
       if (!needsRunUat) return null;
       const { sliceId, uatType } = needsRunUat;
+
+      // Transport preflight: verify required MCP tools are actually connected
+      // before consuming a retry attempt. Fixes tool-starved sessions burning
+      // all MAX_UAT_ATTEMPTS before stopping (#477).
+      const transportError = getWorkflowTransportSupportError(
+        sessionProvider,
+        getRequiredWorkflowToolsForAutoUnit("run-uat"),
+        { projectRoot: basePath, surface: "auto-mode", unitType: "run-uat", authMode: sessionAuthMode, baseUrl: sessionBaseUrl, activeTools },
+      );
+      if (transportError) {
+        return { action: "stop" as const, reason: transportError, level: "warning" as const };
+      }
+      const browserToolError = getUatBrowserToolSupportError({
+        uatType,
+        activeTools,
+        milestoneId: mid,
+        sliceId,
+      });
+      if (browserToolError) {
+        return { action: "stop" as const, reason: browserToolError, level: "warning" as const };
+      }
 
       // Cap run-uat dispatch attempts to prevent infinite replay (#3624).
       // Check before incrementing so an exhausted counter cannot create a
@@ -1063,6 +1165,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
           researchReadySlices,
           basePath,
           resolveModelWithFallbacksForUnit("subagent")?.primary,
+          resolveThinkingLevelForUnit("subagent"),
         ),
       };
     },
@@ -1232,11 +1335,11 @@ export const DISPATCH_RULES: DispatchRule[] = [
       // Gate evaluation is opt-in via preferences
       const gateConfig = prefs?.gate_evaluation;
       if (!gateConfig?.enabled) {
-        markAllGatesOmitted(mid, sid);
+        markPendingGatesOmittedForTurn(mid, sid, "gate-evaluate");
         return { action: "skip" };
       }
 
-      const pending = getPendingGates(mid, sid, "slice");
+      const pending = getPendingGatesForTurn(mid, sid, "gate-evaluate");
       if (pending.length === 0) return { action: "skip" };
 
       return {
@@ -1250,6 +1353,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
           sTitle,
           basePath,
           resolveModelWithFallbacksForUnit("subagent")?.primary,
+          resolveThinkingLevelForUnit("subagent"),
         ),
       };
     },
@@ -1295,6 +1399,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
       if (resolveSliceFile(basePath, mid, sid, "REACTIVE-BLOCKER")) return null;
       const maxParallel = reactiveConfig?.max_parallel ?? 2;
       const subagentModel = reactiveConfig?.subagent_model ?? resolveModelWithFallbacksForUnit("subagent")?.primary;
+      const subagentThinking = resolveThinkingLevelForUnit("subagent");
       // Default-on safety threshold: only activate reactive dispatch when at
       // least N tasks are ready. Users who explicitly enabled reactive_execution
       // keep the legacy threshold of 2 (matches the prior "any parallelism is
@@ -1381,7 +1486,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
             selected,
             basePath,
             subagentModel,
-            { sessionContextWindow, modelRegistry, sessionProvider },
+            { sessionContextWindow, modelRegistry, sessionProvider, subagentThinking },
           ),
         };
       } catch (err) {

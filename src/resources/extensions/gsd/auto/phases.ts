@@ -35,6 +35,8 @@ import { detectStuck } from "./detect-stuck.js";
 import { runUnit } from "./run-unit.js";
 import { debugLog } from "../debug-logger.js";
 import { resolveWorktreeProjectRoot, normalizeWorktreePathForCompare } from "../worktree-root.js";
+import { buildManualValidationGuidance } from "../worktree-manager.js";
+import { relSliceFile } from "../paths.js";
 import { classifyProject } from "../detection.js";
 import { MergeConflictError } from "../git-service.js";
 import { setCurrentPhase, clearCurrentPhase } from "../../shared/gsd-phase-state.js";
@@ -83,6 +85,7 @@ import {
   supportsStructuredQuestions,
 } from "../workflow-mcp.js";
 import { prepareWorkflowMcpForProject } from "../workflow-mcp-auto-prep.js";
+import { getToolBaselineSnapshot, applyThinkingLevelForModel, floorThinkingLevelForUnit } from "../auto-model-selection.js";
 import type { DispatchAction } from "../auto-dispatch.js";
 import { resolveManifest } from "../unit-context-manifest.js";
 import { createWorktreeSafetyModule, type WorktreeSafetyResult } from "../worktree-safety.js";
@@ -397,6 +400,8 @@ async function validateSourceWriteWorktreeSafety(
 
 let consecutiveSessionTimeouts = 0;
 const MAX_SESSION_TIMEOUT_AUTO_RESUMES = 3;
+/** Maximum zero-tool-call retries before pausing — context exhaustion is deterministic. */
+const MAX_ZERO_TOOL_RETRIES = 1;
 
 export function resetSessionTimeoutState(): void {
   consecutiveSessionTimeouts = 0;
@@ -1446,7 +1451,13 @@ export async function runDispatch(
   const authMode = provider && typeof ctx.modelRegistry?.getProviderAuthMode === "function"
     ? ctx.modelRegistry.getProviderAuthMode(provider)
     : undefined;
-  const activeTools = typeof pi.getActiveTools === "function" ? pi.getActiveTools() : [];
+  // Use the baseline snapshot rather than the live active-tool set: a prior
+  // unit's per-provider narrowing (hook overrides, Groq 128-tool cap, etc.)
+  // can strip required MCP tools from the live set even though
+  // selectAndApplyModel will restore them before the unit is dispatched.
+  // Checking a stale-narrowed set causes false transport-preflight warnings
+  // that repeat on every /gsd auto resume (#477 follow-up).
+  const activeTools = getToolBaselineSnapshot(pi);
   // Deep planning intentionally keeps human checkpoints in plain chat. In
   // Claude Code/local MCP transports, structured question requests can be
   // cancelled outside the normal chat flow, which made approval gates easy to
@@ -1470,6 +1481,9 @@ export async function runDispatch(
     sessionContextWindow: ctx.model?.contextWindow,
     sessionProvider: ctx.model?.provider,
     modelRegistry: ctx.modelRegistry as MinimalModelRegistry | undefined,
+    activeTools,
+    sessionBaseUrl: ctx.model?.baseUrl,
+    sessionAuthMode: authMode,
   });
   if (isUnhandledPhaseWarning(dispatchResult)) {
     deps.invalidateAllCaches();
@@ -1493,6 +1507,9 @@ export async function runDispatch(
       sessionContextWindow: ctx.model?.contextWindow,
       sessionProvider: ctx.model?.provider,
       modelRegistry: ctx.modelRegistry as MinimalModelRegistry | undefined,
+      activeTools,
+      sessionBaseUrl: ctx.model?.baseUrl,
+      sessionAuthMode: authMode,
     });
   }
 
@@ -2233,9 +2250,16 @@ export async function runUnitPhase(
     if (match) {
       const ok = await pi.setModel(match, { persist: false });
       if (ok) {
-        if (s.autoModeStartThinkingLevel) {
-          pi.setThinkingLevel(s.autoModeStartThinkingLevel);
-        }
+        // Apply the per-phase reasoning effort selectAndApplyModel resolved for
+        // this unit — not the auto-start session snapshot — but route it through
+        // the same floor + capability-clamp pipeline against the *hook* model
+        // (ADR-026). The hook override can pick a different model family than the
+        // one selectAndApplyModel clamped against, so re-clamping here prevents
+        // sending an unsupported level; the floor fills in when no phase level
+        // resolved so a hook-overridden execute-task still meets the floor.
+        const hookThinkingBase = modelResult.appliedThinkingLevel
+          ?? floorThinkingLevelForUnit(unitType, s.autoModeStartThinkingLevel);
+        applyThinkingLevelForModel(pi, hookThinkingBase, match, ctx);
         s.currentUnitModel = match as AutoSession["currentUnitModel"];
         ctx.ui.notify(`Hook model override: ${match.provider}/${match.id}`, "info");
       } else {
@@ -2711,14 +2735,27 @@ export async function runUnitPhase(
             unitId,
           });
         } else {
+          const zeroToolKey = `${unitType}/${unitId}`;
+          const attempt = (s.zeroToolRetryCount.get(zeroToolKey) ?? 0) + 1;
           debugLog("runUnitPhase", {
             phase: "zero-tool-calls",
             unitType,
             unitId,
+            attempt,
             warning: "Unit completed with 0 tool calls — likely context exhaustion, marking as failed",
           });
+          if (attempt > MAX_ZERO_TOOL_RETRIES) {
+            s.zeroToolRetryCount.delete(zeroToolKey);
+            ctx.ui.notify(
+              `${unitType} ${unitId} completed with 0 tool calls — context exhaustion, pausing auto-mode after ${MAX_ZERO_TOOL_RETRIES} retry.`,
+              "error",
+            );
+            await deps.pauseAuto(ctx, pi);
+            return { action: "break", reason: "zero-tool-calls-exhausted" };
+          }
+          s.zeroToolRetryCount.set(zeroToolKey, attempt);
           ctx.ui.notify(
-            `${unitType} ${unitId} completed with 0 tool calls — context exhaustion, will retry`,
+            `${unitType} ${unitId} completed with 0 tool calls — context exhaustion, will retry (attempt ${attempt}/${MAX_ZERO_TOOL_RETRIES})`,
             "warning",
           );
           return {
@@ -2748,6 +2785,7 @@ export async function runUnitPhase(
   if (artifactVerified) {
     s.unitDispatchCount.delete(dispatchKey);
     s.unitRecoveryCount.delete(`${unitType}/${unitId}`);
+    s.zeroToolRetryCount.delete(dispatchKey);
   }
 
   // Write phase handoff anchor after successful research/planning completion
@@ -2927,10 +2965,21 @@ export async function runFinalize(
   }
 
   if (pauseAfterUatDispatch) {
-    ctx.ui.notify(
-      "UAT requires human execution. Auto-mode will pause after this unit writes the result file.",
-      "info",
-    );
+    const pauseMid = iterData.mid;
+    const pauseSliceId = pauseMid && iterData.unitId.startsWith(`${pauseMid}/`)
+      ? iterData.unitId.slice(pauseMid.length + 1)
+      : undefined;
+    const guidance = pauseMid
+      ? buildManualValidationGuidance(s.basePath, pauseMid, {
+          uatPath: pauseSliceId
+            ? relSliceFile(s.basePath, pauseMid, pauseSliceId, "UAT")
+            : undefined,
+        })
+      : null;
+    const pauseMessage = guidance
+      ? `UAT requires human execution. Auto-mode will pause after this unit writes the result file.\n\n${guidance}`
+      : "UAT requires human execution. Auto-mode will pause after this unit writes the result file.";
+    ctx.ui.notify(pauseMessage, "info");
     await deps.pauseAuto(ctx, pi);
     debugLog("autoLoop", { phase: "exit", reason: "uat-pause" });
     clearFinalizingUnit();
@@ -3126,6 +3175,19 @@ export async function runFinalize(
       const severity = logs.some((e) => e.severity === "error") ? "error" : "warning";
       ctx.ui.notify(formatForNotification(logs), severity);
     }
+  }
+
+  if (preUnitSnapshot?.type === "complete-milestone" && s.currentMilestoneId) {
+    // cleanupAfterLoopExit skips gsd-progress when preserveCompletionSurface is true, so clear stale controls here.
+    ctx.ui.setStatus?.("gsd-step", undefined);
+    ctx.ui.setWidget?.("gsd-progress", undefined);
+    await deps.stopAuto(ctx, pi, `Milestone ${s.currentMilestoneId} complete`, {
+      completionWidget: {
+        milestoneId: s.currentMilestoneId,
+        milestoneTitle: iterData.midTitle,
+      },
+    });
+    return { action: "break", reason: "milestone-complete" };
   }
 
   return { action: "next", data: undefined as void };

@@ -11,8 +11,8 @@ const jiti = require("jiti")(__dirname, { interopDefault: true, debug: false });
 const { resolveBrowserEngineMode } = jiti("../engine/selection.ts");
 
 describe("resolveBrowserEngineMode", () => {
-  it("defaults to gsd-browser", () => {
-    assert.equal(resolveBrowserEngineMode({}), "gsd-browser");
+  it("defaults to the Playwright engine", () => {
+    assert.equal(resolveBrowserEngineMode({}), "legacy");
   });
 
   it("accepts the explicit engine modes", () => {

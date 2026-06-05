@@ -2,7 +2,7 @@
   "id": "browser-tools",
   "name": "Browser Tools",
   "version": "1.0.0",
-  "description": "GSD browser automation contract adapter backed by the managed gsd-browser engine",
+  "description": "GSD browser automation contract adapter backed by Playwright with optional managed gsd-browser support",
   "tier": "bundled",
   "requires": { "platform": ">=2.29.0" },
   "provides": {
