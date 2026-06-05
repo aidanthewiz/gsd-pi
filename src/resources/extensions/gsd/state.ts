@@ -483,7 +483,7 @@ async function buildRegistryAndFindActive(
   let activeMilestoneSlices: SliceRow[] = [];
   let activeMilestoneFound = false;
   let activeMilestoneHasDraft = false;
-  let firstDeferredQueuedShell: { id: string; title: string; deps: string[] } | null = null;
+  let firstDeferredQueuedShell: { id: string; title: string; deps: string[]; hasDraftContext: boolean } | null = null;
 
   for (const m of milestones) {
     if (parkedMilestoneIds.has(m.id)) {
@@ -517,9 +517,9 @@ async function buildRegistryAndFindActive(
         continue;
       }
 
-      if (m.status === 'queued' && slices.length === 0 && !hasContext && !hasDraftContext) {
+      if (m.status === 'queued' && slices.length === 0 && !hasContext) {
         if (!firstDeferredQueuedShell) {
-          firstDeferredQueuedShell = { id: m.id, title, deps };
+          firstDeferredQueuedShell = { id: m.id, title, deps, hasDraftContext };
         }
         registry.push({ id: m.id, title, status: 'pending', ...(deps.length > 0 ? { dependsOn: deps } : {}) });
         continue;
@@ -550,6 +550,7 @@ async function buildRegistryAndFindActive(
     activeMilestone = { id: shell.id, title: shell.title };
     activeMilestoneSlices = [];
     activeMilestoneFound = true;
+    if (shell.hasDraftContext) activeMilestoneHasDraft = true;
     const entry = registry.find(e => e.id === shell.id);
     if (entry) entry.status = 'active';
   }
