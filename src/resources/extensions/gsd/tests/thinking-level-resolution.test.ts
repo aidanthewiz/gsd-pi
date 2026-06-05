@@ -106,6 +106,19 @@ test("execution_simple inherits the execution block when its own is unset", () =
   });
 });
 
+test("thinking.execution_simple resolves for execute-task-simple even when model falls through to execution", () => {
+  // models.execution wins the model chain for execute-task-simple (no execution_simple model).
+  // thinking.execution_simple is explicitly set and must be found — it must not
+  // be shadowed by the winning model phase (execution).
+  withPreferences(
+    ["models:", "  execution: execution-model", "thinking:", "  execution_simple: low"],
+    () => {
+      assert.equal(resolveModelWithFallbacksForUnit("execute-task-simple")?.primary, "execution-model");
+      assert.equal(resolveThinkingLevelForUnit("execute-task-simple"), "low");
+    },
+  );
+});
+
 test("returns undefined when nothing is configured", () => {
   withPreferences(["models:", "  planning: planning-model"], () => {
     assert.equal(resolveThinkingLevelForUnit("execute-task"), undefined);

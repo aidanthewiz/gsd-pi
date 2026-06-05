@@ -159,10 +159,13 @@ export function resolveModelWithFallbacksForUnit(unitType: string): ResolvedMode
  * Resolve the explicitly configured reasoning effort for a unit type (ADR-026).
  *
  * Thinking travels with the model. When a `models` bucket wins the chain, the
- * level is paired to that exact phase: inline `models.<phase>.thinking` first,
- * then the same phase's entry in the separate `thinking` block. A claimed model
- * bucket does not inherit a sibling's thinking. When no model is configured for
- * the unit at all, the `thinking` block resolves on its own sibling chain.
+ * level is resolved as: (1) inline `models.<phase>.thinking` first; (2) the
+ * thinking block walked from the unit's own chain head up to and including the
+ * winning phase. This lets `thinking.execution_simple` surface even when the
+ * model fell through to `execution`, while ensuring a unit that claimed its own
+ * model bucket never borrows a later sibling's thinking block entry. When no
+ * model is configured for the unit at all, the `thinking` block resolves on its
+ * own full sibling chain.
  *
  * Returns undefined when nothing explicit is configured — the dispatch path
  * then falls back to the session/default level and applies the code-writing
@@ -184,7 +187,20 @@ export function resolveThinkingLevelForUnit(unitType: string): GSDThinkingLevel 
     if (typeof winner.config === "object" && winner.config.thinking) {
       return winner.config.thinking;
     }
-    return block?.[winner.phase];
+    // Walk the unit's own chain in the thinking block, stopping at (and
+    // including) the winning model phase. Walking from the head finds the
+    // most-specific key first (e.g. thinking.execution_simple surfaces even
+    // when the model fell through to execution), while the stop ensures a
+    // unit that claimed its own model bucket never borrows a later sibling's
+    // thinking.
+    if (block) {
+      for (const key of chain) {
+        const level = block[key];
+        if (level) return level;
+        if (key === winner.phase) break;
+      }
+    }
+    return undefined;
   }
 
   // No model configured anywhere in the chain — let the thinking block drive
