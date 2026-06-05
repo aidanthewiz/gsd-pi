@@ -45,6 +45,7 @@
 - **Worktree State Projection module**: module that owns the direction-and-rules of state file flow between project root and auto-worktree. Encodes the bug-hardened invariants (additive milestone copy, ASSESSMENT verdict overwrite, completed-units forward-sync, WAL/SHM cleanup) that `syncProjectRootToWorktree` and `syncStateToProjectRoot` carry today.
 - **Recovery Classification module**: module that maps provider, tool, policy, git, worktree, runtime, and reconciliation-drift failures to a Recovery decision.
 - **Tool Contract module**: module that keeps Unit prompts, tool schemas, tool policy, source-observation invariants, and pre-dispatch validation aligned.
+- **Task Output Contract**: the concrete files a planned Task promises to create or overwrite. Distinct from task inputs, verification commands, and human-readable success outcomes.
 - **Observation Budgeting**: context-management policy for what prior tool observations remain available to a Provider on later turns. Distinct from Display Truncation: Observation Budgeting changes model-visible context, while Display Truncation changes only the user-visible terminal surface.
 - **Display Truncation**: rendering policy that hides or collapses tool output in the terminal without changing the underlying tool result available to the session.
 - **File Observation**: a durable record that a source file was observed, including enough identity and coverage metadata to let a Unit reason from the file without repeatedly reconstructing it from line windows.
