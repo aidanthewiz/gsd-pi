@@ -19,7 +19,6 @@
   },
   "files": [
     "dist",
-    "dist/web",
     "packages/*/dist/**",
     "packages/*/bin/**",
     "packages/*/package.json",
@@ -30,12 +29,14 @@
     "scripts/install.js",
     "scripts/install",
     "scripts/link-workspace-packages.cjs",
-    "scripts/ensure-workspace-builds.cjs",
     "scripts/lib/workspace-manifest.cjs",
     "scripts/lib/logo.cjs",
     "package.json",
     "README.md"
   ],
+  "publishConfig": {
+    "provenance": true
+  },
   "piConfig": {
     "name": "gsd",
     "configDir": ".gsd"
@@ -112,6 +113,7 @@
     "sync-pkg-version": "node scripts/sync-pkg-version.cjs",
     "sync-platform-versions": "node native/scripts/sync-platform-versions.cjs",
     "verify:native-platform-packages": "node scripts/verify-native-platform-packages.mjs",
+    "verify:npm-release": "node scripts/verify-npm-release.mjs",
     "verify:version-sync": "node scripts/verify-version-sync.cjs",
     "validate-pack": "node scripts/validate-pack.js",
     "prepack": "node scripts/prepack-resolve-workspace.cjs",

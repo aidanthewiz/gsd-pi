@@ -89,12 +89,12 @@ test("build-native publishes MCP server workspace to npm before the main package
 
   assert.ok(workspacePublish, "workflow must publish workspace packages");
   assert.ok(workspacePublishIndex > -1 && workspacePublishIndex < mainPublishIndex);
-  assert.match(workspacePublish.run, /@opengsd\/contracts/);
-  assert.match(workspacePublish.run, /@opengsd\/rpc-client/);
-  assert.match(workspacePublish.run, /@opengsd\/mcp-server/);
+  // Publishing goes through the shared, derived-list script so this path can't
+  // drift from the production release path (and can't re-introduce the hardcoded
+  // list that dropped cloud-mcp-gateway + daemon).
+  assert.match(workspacePublish.run, /publish-workspace-packages\.sh/);
   assert.match(workspacePublish.run, /prepack-resolve-workspace\.cjs/);
   assert.match(workspacePublish.run, /postpack-restore-workspace\.cjs/);
-  assert.match(workspacePublish.run, /npm publish --workspace "\$\{workspace\}"/);
 
   const mainPublish = steps.find((entry) => entry.name === "Publish main package");
   assert.ok(mainPublish, "workflow must publish the main package");
