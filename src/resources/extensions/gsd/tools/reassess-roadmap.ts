@@ -75,7 +75,7 @@ function validateParams(params: ReassessRoadmapParams): ReassessRoadmapParams {
     throw new Error("sliceChanges.removed must be an array");
   }
 
-  const SLICE_ID_RE = /^[A-Za-z]+\d+$/;
+  const SLICE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
 
   // Validate each modified slice
   for (let i = 0; i < params.sliceChanges.modified.length; i++) {
@@ -175,6 +175,37 @@ export async function handleReassessRoadmap(
         if (completedSliceIds.has(removedId)) {
           guardError = `cannot remove completed slice ${removedId}`;
           return;
+        }
+      }
+
+      // Cross-milestone depends validation — effective slice ID set after this reassessment
+      const removedIds = new Set<string>(params.sliceChanges.removed);
+      const effectiveSliceIds = new Set<string>(
+        existingSlices.map(s => s.id).filter(id => !removedIds.has(id)),
+      );
+      for (const added of params.sliceChanges.added) {
+        effectiveSliceIds.add(added.sliceId);
+      }
+      for (let i = 0; i < params.sliceChanges.modified.length; i++) {
+        const mod = params.sliceChanges.modified[i]!;
+        if (mod.depends !== undefined) {
+          for (const dep of mod.depends) {
+            if (!effectiveSliceIds.has(dep)) {
+              guardError = `sliceChanges.modified[${i}].depends references unknown slice "${dep}" — check that it is defined in this milestone`;
+              return;
+            }
+          }
+        }
+      }
+      for (let i = 0; i < params.sliceChanges.added.length; i++) {
+        const added = params.sliceChanges.added[i]!;
+        if (added.depends !== undefined) {
+          for (const dep of added.depends) {
+            if (!effectiveSliceIds.has(dep)) {
+              guardError = `sliceChanges.added[${i}].depends references unknown slice "${dep}" — check that it is defined in this milestone`;
+              return;
+            }
+          }
         }
       }
 

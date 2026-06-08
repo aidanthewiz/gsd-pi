@@ -1150,7 +1150,7 @@ export function insertSlice(s: {
   planning?: Partial<SlicePlanningRecord>;
 }): void {
   if (!currentDb) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
-  const SLICE_ID_RE = /^[A-Za-z]+\d+$/;
+  const SLICE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
   const invalidDep = (s.depends ?? []).find(d => !SLICE_ID_RE.test(d));
   if (invalidDep !== undefined) {
     throw new GSDError(GSD_STALE_STATE, `insertSlice: depends element "${invalidDep}" is not a valid slice ID`);
@@ -2504,7 +2504,7 @@ export function updateSliceFields(milestoneId: string, sliceId: string, fields: 
   demo?: string;
 }): void {
   if (!currentDb) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
-  const SLICE_ID_RE = /^[A-Za-z]+\d+$/;
+  const SLICE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
   if (fields.depends !== undefined) {
     const invalidDep = fields.depends.find(d => !SLICE_ID_RE.test(d));
     if (invalidDep !== undefined) {

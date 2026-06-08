@@ -115,7 +115,7 @@ function validateProofStrategy(value: unknown): Array<{ riskOrUnknown: string; r
   });
 }
 
-const SLICE_ID_RE = /^[A-Za-z]+\d+$/;
+const SLICE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
 
 function validateSlices(value: unknown): PlanMilestoneSliceInput[] {
   if (!Array.isArray(value) || value.length === 0) {

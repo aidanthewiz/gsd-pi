@@ -192,7 +192,7 @@ export function parseRoadmapSlices(content: string): RoadmapSliceEntry[] {
       // Recovery fallback: double-bracket form `[[id]]` from serialized bracket-wrapped IDs
       const fallbackDepsMatch = depsMatch ? null : rest.match(/`depends:\[(\[(?:[^\]]*)\](?:,\[(?:[^\]]*)\])*)\]`/);
       const rawDepContent = (depsMatch ?? fallbackDepsMatch)?.[1] ?? "";
-      const SLICE_ID_RE = /^[A-Za-z]+\d+$/;
+      const SLICE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
       const RANGE_RE = /^[A-Za-z]+\d+(?:-|\.\.)[A-Za-z]+\d+$/;
       const rawDepParts = rawDepContent.trim()
         ? rawDepContent.replace(/\[|\]/g, "").split(",").map(s => s.trim()).filter(s => SLICE_ID_RE.test(s) || RANGE_RE.test(s))
