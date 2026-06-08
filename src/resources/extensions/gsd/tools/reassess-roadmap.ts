@@ -75,12 +75,19 @@ function validateParams(params: ReassessRoadmapParams): ReassessRoadmapParams {
     throw new Error("sliceChanges.removed must be an array");
   }
 
+  const SLICE_ID_RE = /^[A-Za-z]+\d+$/;
+
   // Validate each modified slice
   for (let i = 0; i < params.sliceChanges.modified.length; i++) {
     const s = params.sliceChanges.modified[i];
     if (!s || typeof s !== "object") throw new Error(`sliceChanges.modified[${i}] must be an object`);
     if (!isNonEmptyString(s.sliceId)) throw new Error(`sliceChanges.modified[${i}].sliceId is required`);
     if (!isNonEmptyString(s.title)) throw new Error(`sliceChanges.modified[${i}].title is required`);
+    if (s.depends !== undefined) {
+      if (!Array.isArray(s.depends) || s.depends.some((item: unknown) => !isNonEmptyString(item) || !SLICE_ID_RE.test(item as string))) {
+        throw new Error(`sliceChanges.modified[${i}].depends must be an array of valid slice IDs (e.g. "S01")`);
+      }
+    }
   }
 
   // Validate each added slice
@@ -89,6 +96,11 @@ function validateParams(params: ReassessRoadmapParams): ReassessRoadmapParams {
     if (!s || typeof s !== "object") throw new Error(`sliceChanges.added[${i}] must be an object`);
     if (!isNonEmptyString(s.sliceId)) throw new Error(`sliceChanges.added[${i}].sliceId is required`);
     if (!isNonEmptyString(s.title)) throw new Error(`sliceChanges.added[${i}].title is required`);
+    if (s.depends !== undefined) {
+      if (!Array.isArray(s.depends) || s.depends.some((item: unknown) => !isNonEmptyString(item) || !SLICE_ID_RE.test(item as string))) {
+        throw new Error(`sliceChanges.added[${i}].depends must be an array of valid slice IDs (e.g. "S01")`);
+      }
+    }
   }
 
   return params;
