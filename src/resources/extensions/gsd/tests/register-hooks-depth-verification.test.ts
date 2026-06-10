@@ -14,6 +14,8 @@ import { deriveState, invalidateStateCache } from "../state.ts";
 import {
   getPendingGate,
   loadWriteGateSnapshot,
+  markApprovalGateVerified,
+  markDepthVerified,
   resetWriteGateState,
   setPendingGate,
   shouldBlockContextArtifactSave,
@@ -891,4 +893,159 @@ test("register-hooks agent_end does not re-arm deferred gate after workflow MCP 
     activeQueuePhase: false,
     pendingGateId: null,
   });
+});
+
+// ── External-engine post-hoc gate replay (write-gate two-process sync) ──────
+// On claude-code-cli, pi ingests the SDK turn's tool blocks after the workflow
+// MCP child already executed them. The depth gate can therefore arrive at
+// tool_execution_start AFTER the child verified it and allowed the CONTEXT
+// save; re-arming then wipes the verification and permanently blocks the
+// discuss→auto handoff.
+
+function makeHookHarness(): {
+  handlers: Map<string, Array<(event: any, ctx?: any) => Promise<any> | any>>;
+  pi: any;
+} {
+  const handlers = new Map<string, Array<(event: any, ctx?: any) => Promise<any> | any>>();
+  const pi = {
+    on(event: string, handler: (event: any, ctx?: any) => Promise<any> | any) {
+      const existing = handlers.get(event) ?? [];
+      existing.push(handler);
+      handlers.set(event, existing);
+    },
+  } as any;
+  return { handlers, pi };
+}
+
+test("tool_execution_start does not re-arm a depth gate the MCP child already verified", async (t) => {
+  const dir = makeTempDir("posthoc-no-rearm");
+  resetWriteGateState(dir);
+  t.after(() => {
+    resetWriteGateState(dir);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const { handlers, pi } = makeHookHarness();
+  registerHooks(pi, []);
+  const ctx = { cwd: dir, ui: { notify: () => undefined } } as any;
+
+  // The child verified the gate and allowed the CONTEXT save before the host
+  // ever saw the tool block.
+  markApprovalGateVerified("depth_verification_M002_confirm", dir);
+  markDepthVerified("M002", dir);
+
+  for (const handler of handlers.get("tool_execution_start") ?? []) {
+    await handler({
+      toolCallId: "t-depth",
+      toolName: "mcp__gsd-workflow__ask_user_questions",
+      args: { questions: [{ id: "depth_verification_M002_confirm" }] },
+    }, ctx);
+  }
+
+  assert.equal(getPendingGate(dir), null, "post-hoc replay must not re-arm a verified gate");
+  const snapshot = loadWriteGateSnapshot(dir);
+  assert.ok(
+    snapshot.verifiedDepthMilestones.includes("M002"),
+    "re-arm wipes verifiedDepthMilestones — the verification must survive the replay",
+  );
+  assert.equal(
+    shouldBlockContextArtifactSave("CONTEXT", "M002", null, dir).block,
+    false,
+    "context saves must stay unlocked after the replayed tool_execution_start",
+  );
+});
+
+test("tool_execution_start still arms an unverified depth gate", async (t) => {
+  const dir = makeTempDir("live-arm");
+  resetWriteGateState(dir);
+  t.after(() => {
+    resetWriteGateState(dir);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const { handlers, pi } = makeHookHarness();
+  registerHooks(pi, []);
+  const ctx = { cwd: dir, ui: { notify: () => undefined } } as any;
+
+  for (const handler of handlers.get("tool_execution_start") ?? []) {
+    await handler({
+      toolCallId: "t-depth",
+      toolName: "ask_user_questions",
+      args: { questions: [{ id: "depth_verification_M002_confirm" }] },
+    }, ctx);
+  }
+
+  assert.equal(getPendingGate(dir), "depth_verification_M002_confirm");
+});
+
+test("tool_result verifies the gate from result.structuredContent when event.details is missing", async (t) => {
+  const dir = makeTempDir("structured-fallback");
+  resetWriteGateState(dir);
+  t.after(() => {
+    resetWriteGateState(dir);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const { handlers, pi } = makeHookHarness();
+  registerHooks(pi, []);
+  const ctx = { cwd: dir, ui: { notify: () => undefined } } as any;
+
+  setPendingGate("depth_verification_M002_confirm", dir);
+
+  const questions = [{
+    id: "depth_verification_M002_confirm",
+    options: [
+      { label: "Yes, you got it (Recommended)" },
+      { label: "Not quite — let me clarify" },
+    ],
+  }];
+  for (const handler of handlers.get("tool_result") ?? []) {
+    await handler({
+      toolCallId: "t-depth",
+      toolName: "mcp__gsd-workflow__ask_user_questions",
+      input: { questions },
+      // External MCP relay: no pi-native details, structured payload on result.
+      result: {
+        content: [{ type: "text", text: "answered" }],
+        structuredContent: {
+          questions,
+          response: {
+            answers: {
+              depth_verification_M002_confirm: { selected: "Yes, you got it (Recommended)", notes: "" },
+            },
+          },
+          cancelled: false,
+        },
+      },
+    }, ctx);
+  }
+
+  assert.equal(getPendingGate(dir), null, "structured fallback must clear the pending gate");
+  assert.ok(loadWriteGateSnapshot(dir).verifiedDepthMilestones.includes("M002"));
+});
+
+test("tool_result without details or structured content leaves the gate pending without crashing", async (t) => {
+  const dir = makeTempDir("no-details");
+  resetWriteGateState(dir);
+  t.after(() => {
+    resetWriteGateState(dir);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const { handlers, pi } = makeHookHarness();
+  registerHooks(pi, []);
+  const ctx = { cwd: dir, ui: { notify: () => undefined } } as any;
+
+  setPendingGate("depth_verification_M002_confirm", dir);
+
+  for (const handler of handlers.get("tool_result") ?? []) {
+    await handler({
+      toolCallId: "t-depth",
+      toolName: "ask_user_questions",
+      input: { questions: [{ id: "depth_verification_M002_confirm" }] },
+      result: { content: [{ type: "text", text: "answered" }] },
+    }, ctx);
+  }
+
+  assert.equal(getPendingGate(dir), "depth_verification_M002_confirm");
 });
