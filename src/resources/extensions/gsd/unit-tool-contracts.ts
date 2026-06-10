@@ -210,7 +210,7 @@ export function getUnitToolSurfaceContract(unitType: string): UnitToolSurfaceCon
   return UNIT_TOOL_CONTRACTS[unitType];
 }
 
-export function getRequiredWorkflowToolsForUnit(unitType: string): string[] {
+export function getRequiredWorkflowToolsForUnit(unitType: string): UnitWorkflowToolName[] {
   return [...(UNIT_TOOL_CONTRACTS[unitType]?.requiredWorkflowTools ?? [])];
 }
 

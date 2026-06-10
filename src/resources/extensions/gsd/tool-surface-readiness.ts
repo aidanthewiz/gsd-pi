@@ -7,8 +7,8 @@ import { isWorkflowToolSurfaceName } from "./workflow-tool-surface.js";
 
 /**
  * Stable phrase recognized as transient by auto-tool-tracking's
- * isToolUnavailableError and error-classifier's transient buckets —
- * keep the three in sync.
+ * isToolUnavailableError and error-classifier's transient buckets,
+ * which build their matchers from this constant.
  */
 export const TOOL_SURFACE_NOT_READY = "workflow tool surface not ready";
 

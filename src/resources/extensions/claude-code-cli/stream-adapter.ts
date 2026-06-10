@@ -1999,8 +1999,9 @@ async function pumpSdkMessages(
 					: {}),
 			},
 		);
+		const workflowMcpServerName = workflowMcpServerNameFromAllowedTools(sdkOpts.allowedTools);
 		const prompt = buildPromptFromContext(context, {
-			workflowMcpServerName: workflowMcpServerNameFromAllowedTools(sdkOpts.allowedTools),
+			workflowMcpServerName,
 			browserMcpServerName: browserMcpServerNameFromAllowedTools(sdkOpts.allowedTools),
 		});
 		const queryPrompt = buildSdkQueryPrompt(context, prompt);
@@ -2057,7 +2058,7 @@ async function pumpSdkMessages(
 					if (init.subtype === "init") {
 						const readinessError = getToolSurfaceReadinessError({
 							unitType: gsdPhase,
-							workflowServerName: workflowMcpServerNameFromAllowedTools(sdkOpts.allowedTools),
+							workflowServerName: workflowMcpServerName,
 							observation: { tools: init.tools ?? [], mcpServers: init.mcp_servers ?? [] },
 						});
 						if (readinessError) {

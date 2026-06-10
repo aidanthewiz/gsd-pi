@@ -7,12 +7,13 @@ import assert from "node:assert/strict";
 import { getToolSurfaceReadinessError } from "../tool-surface-readiness.ts";
 import { isToolUnavailableError } from "../auto-tool-tracking.ts";
 import { classifyError, isTransient } from "../error-classifier.ts";
+import { toMcpToolName } from "../mcp-tool-name.ts";
 import { classifyFailure } from "../recovery-classification.ts";
 
 const SERVER = "gsd-workflow";
 
 function prefixed(tool: string): string {
-  return `mcp__${SERVER}__${tool}`;
+  return toMcpToolName(SERVER, tool);
 }
 
 const RUN_UAT_TOOLS = [

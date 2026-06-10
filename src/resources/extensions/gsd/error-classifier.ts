@@ -10,6 +10,8 @@
  * @see https://github.com/open-gsd/gsd-pi/issues/2577
  */
 
+import { TOOL_SURFACE_NOT_READY } from "./tool-surface-readiness.js";
+
 // ── ErrorClass discriminated union ──────────────────────────────────────────
 
 export type ErrorClass =
@@ -73,7 +75,7 @@ const TOOL_SCHEMA_RE = /schema overload|consecutive tool validation failures/i;
 // GSD tool-surface readiness abort (claude-code stream adapter): the workflow
 // MCP server had not registered the Unit's required tools at SDK init. The
 // server typically finishes connecting within seconds — same-model retry.
-const TOOL_SURFACE_NOT_READY_RE = /workflow tool surface not ready/i;
+const TOOL_SURFACE_NOT_READY_RE = new RegExp(TOOL_SURFACE_NOT_READY, "i");
 // Provider rejected the request shape for the selected model (400 bad request,
 // grammar limits, etc.). Not transient — try a different model/fallback.
 // Context-window 400s stay in SERVER_RE (checked earlier).
