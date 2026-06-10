@@ -61,6 +61,7 @@ import { filterToolsForProvider } from "../model-router.js";
 import { mcpToolMatchesBaseName } from "../mcp-tool-name.js";
 import { RUN_UAT_READ_ONLY_TOOL_NAMES, RUN_UAT_WORKFLOW_TOOL_NAMES } from "../tool-presentation-plan.js";
 import { supportsSourceObservationsForUnit } from "../source-observations.js";
+import { clearPendingAutoStart } from "../pending-auto-start.js";
 
 let approvalQuestionAbortInFlight = false;
 
@@ -808,7 +809,7 @@ export function registerHooks(
     }
   });
 
-  pi.on("session_switch", async (_event, ctx) => {
+  pi.on("session_switch", async (event, ctx) => {
     const basePath = contextBasePath(ctx);
     const preserveCloseoutSurface = isAutoCompletionStopInProgress();
     initSessionNotifications(ctx);
@@ -817,6 +818,13 @@ export function registerHooks(
     clearDeferredApprovalGate();
     await resetAskUserQuestionsTurnCache();
     clearDiscussionFlowState(basePath);
+    // /clear or /new destroys the conversation holding a discuss interview, so
+    // its pending discuss→auto handoff can never be answered — clear it. Resume
+    // restores the interview transcript, so the entry survives. Auto-mode's own
+    // newSession() calls are safe: the handoff consumes the entry on agent_end.
+    if (event.reason === "new") {
+      clearPendingAutoStart(basePath);
+    }
     await syncServiceTierStatus(ctx);
     await applyDisabledModelProviderPolicy(ctx);
     await applyCompactionThresholdOverride(ctx);
