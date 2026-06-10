@@ -72,6 +72,8 @@ Tools are scoped to the discuss allowlist for `discuss-milestone` (see `DISCUSS_
 
 **Re-dispatch guard:** If `hasPendingAutoStart(basePath)` and discussion is still in flight, `showSmartEntry` returns early (“Discussion already in progress”) unless the pending entry is stale (>30s, no CONTEXT/ROADMAP/manifest).
 
+**Finished-but-unconsumed recovery:** Before dead-ending, the guard checks for a discussion that already produced CONTEXT but whose `agent_end` handoff never consumed the entry. When `milestoneHasContext && !isAgentTurnInFlight(ctx)`, `showSmartEntry` clears a stale depth gate belonging to the entry's own milestone (`extractDepthVerificationMilestoneId(pendingGateId) === entry.milestoneId`) and re-runs `checkAutoStartAfterDiscuss(basePath)`, returning if the handoff now accepts. CONTEXT can only be written through a verified depth gate, so a gate still pending for that milestone is provably stale. This recovers the external-engine post-hoc gate clobber: on claude-code-cli, pi ingests the SDK turn's tool blocks after the workflow MCP child already verified the gate and allowed the CONTEXT save, so the `tool_execution_start` hook can re-arm the gate post-hoc and wipe the verification, blocking the handoff silently. The clobber itself is now prevented in `bootstrap/register-hooks.ts` (the re-arm is skipped when the snapshot already records the gate as verified); this guard is the recovery path for a milestone left stuck by a pre-fix clobber.
+
 `/clear` and `/new` destroy the conversation holding the interview, so its pending handoff can never be answered. The `session_switch` hook (`bootstrap/register-hooks.ts`) calls `clearPendingAutoStart(basePath)` when `event.reason === "new"`, deterministically removing the entry — without this, a discussion interrupted **after** its CONTEXT file was written stays pinned forever (the >30s staleness heuristic requires CONTEXT to be absent), dead-ending every later `/gsd` on “Discussion already in progress”. `reason === "resume"` keeps the entry because the restored transcript still contains the question. Auto-mode’s own `newSession()` calls are unaffected: the handoff consumes the entry on `agent_end` before any dispatch.
 
 ## Established project interview (intended)
@@ -210,6 +212,7 @@ Runtime handoff rules:
 | Queued + context | Context-captured success, no hidden `gsd_plan_milestone` retry |
 | Missing DB row + context | Insert minimal queued row, then same context-captured success |
 | Wrong milestone pending gate | Does not block the current milestone handoff |
+| CONTEXT written + stale depth gate, no live turn | Recovered: clears the milestone's gate and re-runs the handoff instead of "Discussion already in progress" |
 
 If two bubbles share one timestamp → model sub-turn (prompt compliance). If two timestamps → check for second `/gsd` dispatch or `agent_end` nudge.
 
@@ -221,9 +224,11 @@ If two bubbles share one timestamp → model sub-turn (prompt compliance). If tw
 | `src/resources/extensions/gsd/prompts/guided-discuss-milestone.md` | Established milestone interview |
 | `src/resources/extensions/gsd/prompts/discuss.md` | Greenfield bootstrap discuss |
 | `src/resources/extensions/gsd/bootstrap/agent-end-recovery.ts` | Post-turn guards |
-| `src/resources/extensions/gsd/bootstrap/register-hooks.ts` | `session_switch` clears `pendingAutoStart` on `/clear`/`/new` |
+| `src/resources/extensions/gsd/bootstrap/register-hooks.ts` | `session_switch` clears `pendingAutoStart` on `/clear`/`/new`; `tool_execution_start` skips re-arming an already-verified depth gate (external-engine post-hoc clobber); `tool_result` falls back to `result.structuredContent` for relayed MCP gate answers |
 | `packages/gsd-agent-modes/.../chat-controller.ts` | Sub-turn → multiple UI segments |
 | `src/resources/extensions/gsd/tests/new-milestone-discuss-routing.test.ts` | Routing regression tests |
+| `src/resources/extensions/gsd/tests/register-hooks-depth-verification.test.ts` | Post-hoc gate replay: re-arm skip + `structuredContent` fallback |
+| `src/resources/extensions/gsd/tests/clear-stale-autostart.test.ts` | Finished-but-unconsumed discussion recovery branch |
 
 ## Related regressions
 
