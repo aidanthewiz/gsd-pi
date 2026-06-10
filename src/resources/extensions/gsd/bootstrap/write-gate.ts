@@ -251,15 +251,19 @@ export function loadWriteGateSnapshot(basePath: string): WriteGateSnapshot {
  * verification there; without this refresh the extension host keeps stale
  * pending-gate memory and `activateDeferredApprovalGate` can re-arm a gate
  * that the subprocess already cleared on disk.
+ *
+ * Returns the snapshot used for the refresh so callers that need to inspect
+ * it (e.g. re-arm guards) avoid a second disk read.
  */
-export function refreshWriteGateStateFromDisk(basePath: string): void {
-  if (!shouldPersistWriteGateSnapshot()) return;
+export function refreshWriteGateStateFromDisk(basePath: string): WriteGateSnapshot {
   const snapshot = loadWriteGateSnapshot(basePath);
+  if (!shouldPersistWriteGateSnapshot()) return snapshot;
   const state = getWriteGateState(basePath);
   state.pendingGateId = snapshot.pendingGateId;
   state.activeQueuePhase = snapshot.activeQueuePhase;
   state.verifiedDepthMilestones = new Set(snapshot.verifiedDepthMilestones);
   state.verifiedApprovalGates = new Set(snapshot.verifiedApprovalGates ?? []);
+  return snapshot;
 }
 
 export function isDepthVerified(basePath: string = process.cwd()): boolean {

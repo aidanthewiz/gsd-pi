@@ -90,7 +90,7 @@ import {
 } from "./preparation.js";
 import { verifyExpectedArtifact } from "./auto-recovery.js";
 import type { MilestoneScope } from "./workspace.js";
-import { getPendingGate } from "./bootstrap/write-gate.js";
+import { clearPendingGate, extractDepthVerificationMilestoneId, getPendingGate } from "./bootstrap/write-gate.js";
 import {
   _getPendingAutoStart,
   clearPendingAutoStart,
@@ -100,7 +100,7 @@ import {
   setPendingAutoStart,
 } from "./pending-auto-start.js";
 import { clearGuidedUnitContext, setGuidedUnitContext } from "./guided-unit-context.js";
-import { scheduleAutoStartAfterIdle } from "./discussion-handoff.js";
+import { checkAutoStartAfterDiscuss, scheduleAutoStartAfterIdle } from "./discussion-handoff.js";
 export {
   maybeHandleEmptyIntentTurn,
   maybeHandleReadyPhraseWithoutFiles,
@@ -1959,6 +1959,20 @@ export async function showSmartEntry(
         // Stale entry from an interrupted discussion — clear and continue
         deletePendingAutoStart(basePath);
       } else {
+        if (milestoneHasContext && !isAgentTurnInFlight(ctx)) {
+          // The discussion already produced CONTEXT but the agent_end handoff
+          // never consumed the entry — e.g. an external-engine post-hoc gate
+          // re-arm wiped the depth verification after the save (write-gate
+          // two-process sync). CONTEXT can only be written through a verified
+          // depth gate, so a gate still pending for this milestone is stale:
+          // clear it and re-run the handoff instead of dead-ending.
+          const gateBasePath = entry.scope.workspace.projectRoot;
+          const pendingGateId = getPendingGate(gateBasePath);
+          if (pendingGateId && extractDepthVerificationMilestoneId(pendingGateId) === entry.milestoneId) {
+            clearPendingGate(gateBasePath);
+          }
+          if (checkAutoStartAfterDiscuss(basePath)) return;
+        }
         ctx.ui.notify("Discussion already in progress — answer the question above to continue.", "info");
         return;
       }
