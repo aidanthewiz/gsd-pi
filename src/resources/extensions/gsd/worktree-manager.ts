@@ -339,6 +339,13 @@ export function createWorktree(basePath: string, name: string, opts: { branch?: 
   const wtPath = join(wtDir, name);
   mkdirSync(wtDir, { recursive: true });
 
+  // When existingPath resolved to a legacy location, the canonical target may
+  // still hold a stale directory from a prior aborted creation (no .git marker).
+  // Remove it so git worktree add does not fail with "path already exists".
+  if (existingPath !== wtPath && existsSync(wtPath) && !isRegisteredGitWorktreeAtPath(basePath, wtPath)) {
+    removeStaleWorktreeDirectory(wtPath, name);
+  }
+
   // Prune any stale worktree entries from a previous removal
   nativeWorktreePrune(basePath);
 
