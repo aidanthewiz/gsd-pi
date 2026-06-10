@@ -1,9 +1,17 @@
 // Project/App: gsd-pi
 // File Purpose: Central Unit-to-tool contracts for phase-aware GSD tool surfaces.
 
+import type { CanonicalWorkflowToolName } from "@opengsd/contracts";
+import type { WorkflowMcpAdapterToolName } from "./workflow-tool-surface.js";
+
+/** Workflow-surface names a Unit contract may reference. Drift from WORKFLOW_TOOL_CONTRACTS fails typecheck. */
+export type UnitWorkflowToolName = CanonicalWorkflowToolName | WorkflowMcpAdapterToolName;
+
+export type UnitGsdToolName = UnitWorkflowToolName | "subagent";
+
 export interface UnitToolSurfaceContract {
-  allowedGsdTools: readonly string[];
-  requiredWorkflowTools: readonly string[];
+  allowedGsdTools: readonly UnitGsdToolName[];
+  requiredWorkflowTools: readonly UnitWorkflowToolName[];
   forbiddenGsdTools?: Readonly<Record<string, string>>;
 }
 
@@ -202,7 +210,7 @@ export function getUnitToolSurfaceContract(unitType: string): UnitToolSurfaceCon
   return UNIT_TOOL_CONTRACTS[unitType];
 }
 
-export function getRequiredWorkflowToolsForUnit(unitType: string): string[] {
+export function getRequiredWorkflowToolsForUnit(unitType: string): UnitWorkflowToolName[] {
   return [...(UNIT_TOOL_CONTRACTS[unitType]?.requiredWorkflowTools ?? [])];
 }
 

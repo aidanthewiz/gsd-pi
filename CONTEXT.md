@@ -34,6 +34,9 @@
 - **Worktree State Projection**: directional flow of state files between the project root and the auto-worktree, where one side is authoritative per file class (e.g., project root is authoritative for `completed-units.json` after crash recovery; worktree is authoritative for in-flight artifacts).
 - **Drift**: a state-shape mismatch between DB rows, disk artifacts, and in-memory state that has a known repair. Distinct from a `blocker`, which describes a terminal condition needing human attention or recovery escalation.
 - **Drift catalog**: the discriminated union of drift kinds the State Reconciliation Module recognizes and can repair.
+- **Tool Surface Readiness**: the Tool Contract module's runtime face — verification at SDK session init that the live tool surface (registered tools + MCP server statuses) covers the Unit's required workflow tools, aborting before the first model turn when it does not. Complements the static pre-dispatch gate (`getWorkflowTransportSupportError`), which only proves the MCP launch config is discoverable; the workflow server connects asynchronously after session start, so only the init message can prove registration. See `docs/dev/ADR-036-tool-surface-readiness.md`.
+- **`tool-unavailable` (Recovery kind)**: the Recovery Classification failure kind for a tool call that raced the workflow MCP server's registration (`No such tool available` / a Tool Surface Readiness abort). Transient — action `retry` with bounded attempts and its own exit reason; distinct from `tool-schema`/`tool-contract`, which are deterministic stops. The system retries; the model must never improvise a fallback around a missing workflow tool.
+- **Workflow Bridge Warm-up**: the stdio MCP server's eager load + shape-check of the executor and write-gate bridges at startup. A broken bridge fails the spawn with the actionable error (fail closed) instead of advertising tools that error on first call; a healthy spawn pre-pays the bridge import.
 
 ## Architecture terms adopted for this area
 
@@ -153,6 +156,10 @@ Dispatch remains responsible for selecting the next Unit from reconciled state. 
   See `docs/dev/ADR-030-two-altitude-state-machine.md`.
 
 - Foreground `/gsd next` and `/gsd auto` runs follow **Closeout Boundary Stop**: after the first durable task, slice, or milestone closeout boundary, the foreground terminal preserves the closeout transcript as the final visible surface instead of replacing it with a terminal roll-up widget. Headless runs may still emit durable terminal completion notifications/widgets for automation.
+
+- Tool availability is enforced at **two altitudes**: the static pre-dispatch gate (launch-config discoverability, name membership) stays at dispatch sites, and **Tool Surface Readiness** verifies the live surface at SDK init before the first model turn. The startup race classifies as the transient `tool-unavailable` Recovery kind (bounded retry), the MCP server fails closed on a broken bridge (Workflow Bridge Warm-up), and per-Unit tool name lists are typed against the `CanonicalWorkflowToolName` literal union so drift fails typecheck. The fold of the four static-gate call sites into one helper is deferred.
+
+  See `docs/dev/ADR-036-tool-surface-readiness.md`.
 
 - Worktree placement deepens behind the **Worktree Placement module**: new worktrees are created at the Canonical Worktree Container (`<projectRoot>/.gsd-worktrees/<MID>`), the Legacy Worktree Container stays recognized for in-flight worktrees, and `findWorktreeSegment` (worktree-root.ts) is the only marker-matching implementation — new layouts are taught in exactly two places (placement forward, worktree-root reverse). ADR-002's "no external state directory exists" closure is amended: the External State Layout shipped.
 
