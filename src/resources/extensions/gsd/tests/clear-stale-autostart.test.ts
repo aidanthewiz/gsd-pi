@@ -74,6 +74,28 @@ describe("clear stale pending auto-start (#3667)", () => {
     );
   });
 
+  test("guided-flow recovers a finished-but-unconsumed discussion instead of dead-ending", () => {
+    // CONTEXT exists + no live turn means the discussion completed but the
+    // agent_end handoff never consumed the entry (e.g. an external-engine
+    // post-hoc gate re-arm wiped the depth verification after the save).
+    // Without recovery, every /gsd prints "Discussion already in progress"
+    // forever: the stale heuristic requires CONTEXT to be absent and
+    // discussPlanComplete requires a ROADMAP that planning never produced.
+    const source = readFileSync(join(__dirname, "..", "guided-flow.ts"), "utf-8");
+    assert.ok(
+      source.includes("milestoneHasContext && !isAgentTurnInFlight(ctx)"),
+      "pending-entry guard must have a recovery branch for CONTEXT-present, no-turn-in-flight entries",
+    );
+    assert.ok(
+      source.includes("extractDepthVerificationMilestoneId(pendingGateId) === entry.milestoneId"),
+      "recovery must only clear a pending gate belonging to the entry's own milestone",
+    );
+    assert.ok(
+      source.includes("if (checkAutoStartAfterDiscuss(basePath)) return;"),
+      "recovery must re-run the discuss→auto handoff after clearing the stale gate",
+    );
+  });
+
   test("guided-flow does not treat a live discuss turn as a stale pending entry", () => {
     const source = readFileSync(join(__dirname, "..", "guided-flow.ts"), "utf-8");
     assert.ok(

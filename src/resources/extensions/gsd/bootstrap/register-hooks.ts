@@ -577,8 +577,7 @@ function activateDeferredApprovalGate(basePath: string): void {
   if (deferredApprovalGate?.basePath !== basePath) return;
   const gateId = deferredApprovalGate.gateId;
   deferredApprovalGate = null;
-  refreshWriteGateStateFromDisk(basePath);
-  const snapshot = loadWriteGateSnapshot(basePath);
+  const snapshot = refreshWriteGateStateFromDisk(basePath);
   const milestoneId = extractDepthVerificationMilestoneId(gateId);
   if (isApprovalGateVerifiedInSnapshot(snapshot, gateId)) return;
   if (milestoneId && isMilestoneDepthVerifiedInSnapshot(snapshot, milestoneId)) return;
@@ -600,6 +599,26 @@ function isContextDraftSummarySave(toolName: string, input: unknown): boolean {
   if (toolName !== "gsd_summary_save" && toolName !== "summary_save") return false;
   if (!input || typeof input !== "object") return false;
   return (input as { artifact_type?: unknown }).artifact_type === "CONTEXT-DRAFT";
+}
+
+/**
+ * External engines (claude-code-cli) deliver ask_user_questions results as
+ * relayed MCP tool results: the structured round payload arrives in
+ * `result.structuredContent`, not in pi-native `event.details`. Without this
+ * fallback, applyAskUserQuestionsGateResult sees no response for an answered
+ * gate question and lands in the "waiting" branch — leaving a re-armed gate
+ * permanently pending and the discuss→auto handoff blocked.
+ */
+function resolveAskUserQuestionsGateDetails(event: { details?: unknown; result?: unknown }): any {
+  const hasRoundShape = (value: any): boolean =>
+    !!value && typeof value === "object" &&
+    (value.cancelled !== undefined || value.response !== undefined);
+
+  const details = event.details as any;
+  if (hasRoundShape(details)) return details;
+  const structured = (event.result as { structuredContent?: unknown } | undefined)?.structuredContent;
+  if (hasRoundShape(structured)) return structured;
+  return details ?? {};
 }
 
 type StructuredQuestion = {
@@ -1402,9 +1421,9 @@ export function registerHooks(
     const basePath = contextBasePath(ctx);
     const milestoneId = await getDiscussionMilestoneIdFor(basePath);
 
-    const details = event.details as any;
+    const details = resolveAskUserQuestionsGateDetails(event);
 
-    const questions: any[] = (event.input as any)?.questions ?? [];
+    const questions: any[] = (event.input as any)?.questions ?? details?.questions ?? [];
     const gateResult = applyAskUserQuestionsGateResult({
       basePath,
       questions,
@@ -1445,7 +1464,24 @@ export function registerHooks(
     if (toolName === "ask_user_questions") {
       const questionId = extractGateQuestionId(event.args);
       if (typeof questionId === "string") {
-        setPendingGate(questionId, basePath);
+        // External engines (claude-code-cli) ingest the SDK turn's tool blocks
+        // post-hoc, so this event can fire AFTER the workflow MCP child already
+        // verified this gate and allowed the CONTEXT save. setPendingGate also
+        // revokes verifiedDepthMilestones/verifiedApprovalGates, so an
+        // unconditional re-arm here wipes the child's verification and leaves
+        // the discuss→auto handoff permanently blocked. Skip the re-arm when
+        // the snapshot already records this exact gate as verified — mirrors
+        // activateDeferredApprovalGate's guard. Stale verified state cannot
+        // leak into a later re-discussion: a successful handoff deletes the
+        // snapshot via clearDiscussionFlowState.
+        const snapshot = refreshWriteGateStateFromDisk(basePath);
+        const gateMilestoneId = extractDepthVerificationMilestoneId(questionId);
+        const alreadyVerified =
+          isApprovalGateVerifiedInSnapshot(snapshot, questionId) ||
+          isMilestoneDepthVerifiedInSnapshot(snapshot, gateMilestoneId);
+        if (!alreadyVerified) {
+          setPendingGate(questionId, basePath);
+        }
         clearDeferredApprovalGate(basePath);
       }
     }
