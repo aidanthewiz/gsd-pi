@@ -63,6 +63,7 @@ import { mcpToolMatchesBaseName } from "../mcp-tool-name.js";
 import { RUN_UAT_READ_ONLY_TOOL_NAMES, RUN_UAT_WORKFLOW_TOOL_NAMES } from "../tool-presentation-plan.js";
 import { supportsSourceObservationsForUnit } from "../source-observations.js";
 import { clearPendingAutoStart } from "../pending-auto-start.js";
+import { resolveWorkflowToolBasePath } from "./dynamic-tools.js";
 
 let approvalQuestionAbortInFlight = false;
 
@@ -1389,7 +1390,7 @@ export function registerHooks(
     if (!event.isError && !isAutoActive() && isUnitCloseoutTool(toolName)) {
       try {
         runInteractiveUnitCloseout({
-          basePath: contextBasePath(ctx),
+          basePath: resolveWorkflowToolBasePath(ctx, event.input as { milestone_id?: string }),
           canonicalToolName: toolName,
           input: event.input,
         });
