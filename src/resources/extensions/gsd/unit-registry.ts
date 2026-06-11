@@ -24,6 +24,7 @@
 // implicit in auto-prompts.ts builders).
 
 import type { CanonicalWorkflowToolName } from "@opengsd/contracts";
+import { BROWSER_CONTRACT_TOOL_NAMES } from "../shared/browser-contract.js";
 import type { GSDModelPhaseKey } from "./preferences-types.js";
 import type { WorkflowMcpAdapterToolName } from "./workflow-tool-surface.js";
 
@@ -82,26 +83,12 @@ export const RUN_UAT_READ_ONLY_TOOL_NAMES = [
   "read",
 ] as const;
 
-export const RUN_UAT_BROWSER_TOOL_NAMES = [
-  "browser_navigate",
-  "browser_click",
-  "browser_type",
-  "browser_fill_form",
-  "browser_click_ref",
-  "browser_fill_ref",
-  "browser_wait_for",
-  "browser_assert",
-  "browser_verify",
-  "browser_screenshot",
-  "browser_snapshot_refs",
-  "browser_find",
-  "browser_get_console_logs",
-  "browser_get_network_logs",
-  "browser_evaluate",
-  "browser_reload",
-  "browser_batch",
-  "browser_act",
-] as const;
+/**
+ * Browser tools presented to run-uat. A derived view of the Browser Automation
+ * Contract vocabulary (shared/browser-contract.ts) — the contract module is the
+ * only place browser tool names are declared.
+ */
+export const RUN_UAT_BROWSER_TOOL_NAMES = BROWSER_CONTRACT_TOOL_NAMES;
 
 // ─── The registry ─────────────────────────────────────────────────────────
 

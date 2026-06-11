@@ -15,6 +15,10 @@ function scaffoldProject(root: string, pkg: Record<string, unknown>): void {
   writeFileSync(join(root, "package.json"), JSON.stringify(pkg, null, 2));
 }
 
+const LEGACY_ENGINE = { engine: "legacy", source: "probe", reason: "test" } as const;
+const MANAGED_ENGINE = { engine: "gsd-browser", source: "probe", reason: "test" } as const;
+const OFF_ENGINE = { engine: "off", source: "env", reason: "test" } as const;
+
 describe("web-app-uat guidance", () => {
   test("returns null for non-web projects", () => {
     const root = mkdtempSync(join(tmpdir(), "gsd-web-uat-"));
@@ -36,10 +40,49 @@ describe("web-app-uat guidance", () => {
         scripts: { dev: "vite" },
       });
       assert.equal(detectWebApp(root), true);
-      const block = buildWebAppUatGuidanceBlock(root);
+      const block = buildWebAppUatGuidanceBlock(root, LEGACY_ENGINE);
       assert.ok(block);
       assert.match(block!, /browser-executable/);
+      assert.match(block!, /Playwright-backed `browser_\*` tools/);
       assert.match(block!, /Playwright scaffolding/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("describes the managed gsd-browser engine when it is the resolved backing", () => {
+    const root = mkdtempSync(join(tmpdir(), "gsd-web-uat-"));
+    try {
+      scaffoldProject(root, {
+        dependencies: { react: "19.0.0" },
+        scripts: { dev: "vite" },
+      });
+      const block = buildWebAppUatGuidanceBlock(root, MANAGED_ENGINE);
+      assert.ok(block);
+      assert.match(block!, /managed gsd-browser engine/);
+      assert.match(block!, /browser-executable/);
+      assert.doesNotMatch(block!, /Playwright-backed/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("steers to runtime-executable UAT when browser tools are off", () => {
+    const root = mkdtempSync(join(tmpdir(), "gsd-web-uat-"));
+    try {
+      scaffoldProject(root, {
+        dependencies: { react: "19.0.0" },
+        scripts: { dev: "vite" },
+      });
+      const block = buildWebAppUatGuidanceBlock(root, OFF_ENGINE);
+      assert.ok(block);
+      assert.match(block!, /browser tools are disabled/);
+      assert.doesNotMatch(block!, /- `browser-executable`/);
+      // mixed/live-runtime require browser tools per UAT_MODE_POLICIES, so the
+      // bullet must drop out too — recommending them would dead-end at dispatch.
+      assert.doesNotMatch(block!, /- `mixed`/);
+      assert.doesNotMatch(block!, /interactive `browser_\*` checks/);
+      assert.match(block!, /runtime-executable/);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

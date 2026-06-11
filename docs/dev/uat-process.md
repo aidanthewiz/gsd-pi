@@ -20,9 +20,9 @@ This document names the current UAT contract so prompt, dispatch, browser toolin
 - Result-save requirements such as runtime evidence for `runtime-executable` and browser evidence for `browser-executable`.
 - Dispatch-time browser tool support checks when an active tool snapshot is available.
 
-## Browser And Playwright
+## Browser Engine
 
-GSD exposes a product-level Browser Automation Contract with canonical `browser_*` tool names. Per ADR-024, Playwright-backed browser tools are the default Pi Provider path. `gsd-browser` remains available for External MCP Clients and explicit managed-engine opt-in.
+GSD exposes a product-level Browser Automation Contract with canonical `browser_*` tool names, declared once in `src/resources/extensions/shared/browser-contract.ts`. Per ADR-037, browser-facing projects prefer the managed `gsd-browser` engine when the availability probe proves a CLI exists and a session-start daemon connect succeeds; otherwise (and for non-browser-facing projects) the session falls back to legacy Playwright with a recorded reason. `GSD_BROWSER_ENGINE` remains the explicit override, and `gsd-browser` remains available for External MCP Clients via `/gsd mcp init`.
 
 `browser-executable`, `live-runtime`, `mixed`, and `human-experience` UAT modes require browser tools when the active tool snapshot is known. If no browser tool is present, dispatch stops before burning a UAT retry attempt. A UAT that uses a Playwright command should be declared `runtime-executable` and should record runtime evidence through `gsd_uat_exec`.
 

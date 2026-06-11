@@ -1,6 +1,7 @@
 // Project/App: gsd-pi
 // File Purpose: Central UAT mode policy for dispatch, tool presentation, and result validation.
 
+import { hasBrowserContractPrefix } from "../shared/browser-contract.js";
 import { extractUatType } from "./files.js";
 import type { UatType } from "./files.js";
 import { hasBrowserRequiredText } from "./browser-evidence.js";
@@ -126,7 +127,7 @@ export function uatTypeIncludesBrowser(uatType: string | undefined): boolean {
 export function isUatBrowserToolName(toolName: string): boolean {
   const parsed = parseMcpToolName(toolName);
   const canonicalName = parsed?.toolName ?? toolName;
-  if (canonicalName.startsWith("browser_")) return true;
+  if (hasBrowserContractPrefix(canonicalName)) return true;
   return parsed?.toolName === "*" && parsed.serverName.toLowerCase().includes("browser");
 }
 

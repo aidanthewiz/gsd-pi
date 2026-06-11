@@ -1,9 +1,9 @@
 # ADR-024: Keep Playwright as the Default Browser Automation Engine
 
-**Status:** Accepted
+**Status:** Superseded in part by ADR-037 (the default-engine decision: browser-facing projects now prefer gsd-browser via proven resolution). The Browser Automation Contract boundary, MCP naming, and `/gsd mcp init` decisions remain in force.
 **Date:** 2026-06-03
-**Updated:** 2026-06-04
-**Related:** `CONTEXT.md`, `docs/dev/ADR-008-gsd-tools-over-mcp-for-provider-parity.md`, `docs/dev/ADR-020-cloud-mcp-gateway-local-runtime.md`
+**Updated:** 2026-06-10
+**Related:** `CONTEXT.md`, `docs/dev/ADR-008-gsd-tools-over-mcp-for-provider-parity.md`, `docs/dev/ADR-020-cloud-mcp-gateway-local-runtime.md`, `docs/dev/ADR-037-browser-engine-proven-resolution.md`
 
 ## Context
 

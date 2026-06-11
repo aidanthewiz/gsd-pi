@@ -1,9 +1,25 @@
 // Project/App: gsd-pi
 // File Purpose: Shared browser-observable UAT requirement and evidence detection.
 
-export const BROWSER_REQUIREMENT_RE = /\b(?:file:\/\/|localhost|playwright|chrome|screenshot|snapshot|browser_(?:assert|batch|find|verify|snapshot_refs))\b|\b(?:open|launch|navigate|load|visit|serve|start)\b.{0,80}\b(?:browser|page|localhost|file:\/\/)\b|\bbrowser\s+(?:check|session|test|uat|tool|automation|interaction|flow)\b/i;
+import { BROWSER_EVIDENCE_SIGNAL_TOOL_NAMES } from "../shared/browser-contract.js";
+
+// Alternation fragment over the contract's evidence-signal names, e.g.
+// `browser_(?:assert|batch|...)`. The names are `browser_`-prefixed
+// identifiers (pinned by tests/browser-contract.test.ts), so no escaping is
+// needed.
+const BROWSER_TOOL_SIGNAL = `browser_(?:${
+  BROWSER_EVIDENCE_SIGNAL_TOOL_NAMES.map((name) => name.slice("browser_".length)).join("|")
+})`;
+
+export const BROWSER_REQUIREMENT_RE = new RegExp(
+  String.raw`\b(?:file://|localhost|playwright|chrome|screenshot|snapshot|${BROWSER_TOOL_SIGNAL})\b|\b(?:open|launch|navigate|load|visit|serve|start)\b.{0,80}\b(?:browser|page|localhost|file://)\b|\bbrowser\s+(?:check|session|test|uat|tool|automation|interaction|flow)\b`,
+  "i",
+);
 export const NO_BROWSER_EVIDENCE_RE = /\b(?:no|without|not|wasn'?t|isn'?t)\s+(?:automated\s+)?(?:live\s+)?browser(?:\s+(?:session|test|uat))?|\bno\s+automated\s+browser\b|\bnot\s+conducted\b/i;
-export const BROWSER_RUNTIME_RE = /\b(?:browser|playwright|chrome|camoufox|browser_(?:assert|batch|find|verify|snapshot_refs)|screenshot|snapshot|file:\/\/|localhost)\b/i;
+export const BROWSER_RUNTIME_RE = new RegExp(
+  String.raw`\b(?:browser|playwright|chrome|camoufox|${BROWSER_TOOL_SIGNAL}|screenshot|snapshot|file://|localhost)\b`,
+  "i",
+);
 export const BROWSER_ACTION_RE = /\b(?:open(?:ed)?|navigate(?:d)?|click(?:ed)?|type(?:d)?|reload(?:ed)?|capture(?:d)?|screenshot|snapshot)\b/i;
 export const BROWSER_ASSERTION_RE = /\b(?:assert(?:ed|ion)?|observed|confirmed|verified|expected|visible|text|count|label|strikethrough|localstorage|screenshot|snapshot|passed)\b/i;
 const NON_REQUIREMENT_BROWSER_HEADING_RE = /^(?:not\s+proven|not\s+covered|out\s+of\s+scope|deferred|follow-?ups?|known\s+limitations|notes\s+for\s+tester)\b/i;

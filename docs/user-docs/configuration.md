@@ -154,7 +154,7 @@ If you prefer to maintain the MCP entry manually, add:
 }
 ```
 
-Keep this in `.gsd/mcp.json` when browser paths, vault settings, or session state are machine-local. Use `.mcp.json` only when the team should share the same server entry. Set `GSD_BROWSER_MCP_ENABLED=0` only to skip writing the external MCP entry; it does not disable Pi browser tools. Use `GSD_BROWSER_ENGINE=gsd-browser` for the managed engine, `GSD_BROWSER_ENGINE=playwright` or `legacy` for the default Playwright engine, or `GSD_BROWSER_ENGINE=off` to disable Pi browser tools.
+Keep this in `.gsd/mcp.json` when browser paths, vault settings, or session state are machine-local. Use `.mcp.json` only when the team should share the same server entry. Set `GSD_BROWSER_MCP_ENABLED=0` only to skip writing the external MCP entry; it does not disable Pi browser tools. Browser-facing projects automatically prefer the managed `gsd-browser` engine when it is available and starts cleanly, falling back to Playwright otherwise. Use `GSD_BROWSER_ENGINE=gsd-browser` to force the managed engine, `GSD_BROWSER_ENGINE=playwright` (or `legacy`) to force the Playwright engine, or `GSD_BROWSER_ENGINE=off` to disable Pi browser tools.
 
 ### Example: HTTP server
 
