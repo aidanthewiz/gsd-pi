@@ -24,7 +24,7 @@ Use `subagent` only when useful: reviewer, security, or tester. Apply findings b
 
 1. Use the inlined Slice Summary and UAT templates.
 2. {{skillActivation}}
-3. Run all slice-level verification through `gsd_exec` / Context Mode evidence; refresh current state if needed. Do not use direct `bash` for verification commands.
+3. Run all slice-level verification through `gsd_exec` / Context Mode evidence; refresh current state if needed. Do not use direct `bash` for verification commands. See the prepended **Tool Surface** block for unavailable tools.
 4. Complete only when every required check passes. If verification fails or source changes are needed, do **not** edit source files in this unit and do **not** call `gsd_slice_complete`.
 5. If verification fails:
    - Task-specific regressions: if the failure is in files the task touched and pre-task verification evidence shows it was absent before that task ran, call `gsd_task_reopen` with that task and reason.

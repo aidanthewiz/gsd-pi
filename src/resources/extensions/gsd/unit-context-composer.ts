@@ -43,8 +43,10 @@ import {
   type ComputedArtifactId,
   type ComputedArtifactRegistry,
   type ContextModePolicy,
+  type ToolsPolicy,
   type UnitContextManifest,
 } from "./unit-context-manifest.js";
+import { getUnitToolSurfaceContract } from "./unit-tool-contracts.js";
 import type { UnitPromptContextContract } from "./tool-contract.js";
 
 /**
@@ -169,6 +171,101 @@ export function composeContextModeInstructions(
     `Lane: **${lane} lane**.`,
     guidance,
   ].join("\n");
+}
+
+// ─── Tool surface hardening ───────────────────────────────────────────────
+//
+// Upfront guidance for units whose runtime tool surface is narrower than the
+// default Claude/native set. Prevents wasted turns on tools that are blocked
+// by the write gate or Claude Code SDK allowlists (run-uat gsd_exec/Bash).
+
+export interface ComposeToolSurfaceInstructionOptions {
+  readonly renderMode: ContextModeRenderMode;
+}
+
+const TOOL_SURFACE_GUIDANCE_BY_UNIT: Record<string, string> = {
+  "run-uat":
+    "Do not call `gsd_exec`, `Bash`, `Write`, or `Edit` — they are unavailable in this unit. Run every automated check through `gsd_uat_exec` with the appropriate `intent`. For browser UAT modes, use `browser_*` tools when presented; if browser automation fails, record the failure honestly and use `gsd_uat_exec` for the best objective substitute.",
+  "complete-slice":
+    "Run slice-level verification through `gsd_exec` (or MCP-scoped `mcp__…__gsd_exec`), not direct `bash`. Do not call `gsd_uat_result_save` — run-uat owns persisted UAT assessment. On verification failure, do not edit user source files in this unit.",
+  "gate-evaluate":
+    "Dispatch only **tester** subagents via `subagent`. Persist each gate with `gsd_save_gate_result`. Do not use `ToolSearch` — it is not available.",
+  "reactive-execute":
+    "Dispatch only **worker** subagents via `subagent`. Do not call `gsd_task_complete` from this parent batch — each worker owns its task completion. If a failed task left no summary, call `gsd_summary_save` with `blocker_discovered: true`.",
+  "execute-task":
+    "Complete only this task via `gsd_task_complete`. Do not call `gsd_slice_complete`, `gsd_validate_milestone`, or `gsd_complete_milestone` — the orchestrator owns phase transitions.",
+  "validate-milestone":
+    "Dispatch reviewer subagents in parallel, then persist the verdict via `gsd_validate_milestone`. Do not query `.gsd/gsd.db` directly — use `gsd_milestone_status` and inlined context.",
+  "complete-milestone":
+    "Persist completion only through `gsd_complete_milestone` after verification passes. Do not query `.gsd/gsd.db` directly. Do not write `.gsd/PROJECT.md` or `.gsd/REQUIREMENTS.md` by hand — use `gsd_summary_save` and `gsd_requirement_update`.",
+  "replan-slice":
+    "Persist replans through `gsd_replan_slice` only. Do not edit `PLAN.md` or task plans directly.",
+  "plan-slice":
+    "Persist planning through `gsd_plan_slice` only. Dispatch subagents only to **scout** or **planner** for reconnaissance — not implementation agents. Do not edit user source files outside `.gsd/**`.",
+  "refine-slice":
+    "Persist refinements through `gsd_plan_slice` only. Dispatch subagents only to **scout** or **planner**. Do not edit user source files outside `.gsd/**`.",
+  "plan-milestone":
+    "Persist milestone planning through `gsd_plan_milestone` / `gsd_plan_slice`. Do not edit user source files outside `.gsd/**`.",
+  "research-slice":
+    "Dispatch subagents only to **scout** or **planner** for reconnaissance. Do not edit user source files outside `.gsd/**`.",
+};
+
+function guidanceForToolsPolicy(policy: ToolsPolicy): string | null {
+  switch (policy.mode) {
+    case "planning":
+      return "Writes are restricted to `.gsd/**` under the working directory — do not edit user source files. `bash` is limited to read-only investigation commands. Do not dispatch subagents. For human elicitation, use workflow MCP `ask_user_questions` when available — not native `AskUserQuestion`.";
+    case "planning-dispatch": {
+      const agents = policy.allowedSubagents.map((agent) => `**${agent}**`).join(", ");
+      return `Writes are restricted to \`.gsd/**\`. Dispatch subagents only to: ${agents}. Do not edit user source files.`;
+    }
+    case "docs":
+      return "Writes are restricted to `.gsd/**` and project documentation paths (`docs/`, `README*`, `CHANGELOG.md`, root `*.md`). Do not edit application source.";
+    case "verification": {
+      const subagentLine = policy.allowedSubagents?.length
+        ? ` Dispatch subagents only to: ${policy.allowedSubagents.map((agent) => `**${agent}**`).join(", ")}.`
+        : " Do not dispatch subagents.";
+      return `\`bash\` is limited to build/test verification commands. Writes restricted to \`.gsd/**\`.${subagentLine}`;
+    }
+    default:
+      return null;
+  }
+}
+
+function formatForbiddenWorkflowToolsLine(unitType: string): string | null {
+  const forbidden = getUnitToolSurfaceContract(unitType)?.forbiddenGsdTools;
+  if (!forbidden) return null;
+  const names = Object.keys(forbidden);
+  if (names.length === 0) return null;
+  if (TOOL_SURFACE_GUIDANCE_BY_UNIT[unitType]) return null;
+  return `Do not call ${names.map((name) => `\`${name}\``).join(", ")} in this unit.`;
+}
+
+/**
+ * Render upfront tool-surface guidance for a unit type. Unknown units and
+ * unrestricted (`tools.mode: "all"`) units omit the block unless they have
+ * unit-specific closeout guidance registered above.
+ */
+export function composeToolSurfaceInstructions(
+  unitType: string,
+  opts: ComposeToolSurfaceInstructionOptions,
+): string {
+  const manifest = resolveManifest(unitType);
+  if (!manifest) return "";
+
+  const unitGuidance = TOOL_SURFACE_GUIDANCE_BY_UNIT[unitType];
+  const policyGuidance = unitGuidance ? null : guidanceForToolsPolicy(manifest.tools);
+  const forbiddenLine = formatForbiddenWorkflowToolsLine(unitType);
+  const parts = [unitGuidance, policyGuidance, forbiddenLine].filter(
+    (part): part is string => typeof part === "string" && part.length > 0,
+  );
+  if (parts.length === 0) return "";
+
+  const body = parts.join(" ");
+  if (opts.renderMode === "nested") {
+    return `Tool surface: ${body}`;
+  }
+
+  return ["## Tool Surface", "", body].join("\n");
 }
 
 // ─── v2 surface (#4924) ───────────────────────────────────────────────────

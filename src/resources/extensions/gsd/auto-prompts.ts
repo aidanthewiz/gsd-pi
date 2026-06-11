@@ -40,6 +40,7 @@ import {
   composeContextModeInstructions,
   composeContractedUnitContext,
   composeInlinedContext,
+  composeToolSurfaceInstructions,
   composeUnitContext,
   type ArtifactResolver,
   type ComposedUnitContextBlock,
@@ -292,10 +293,12 @@ function prependContextModeToBlock(
   block: string,
   renderMode: ContextModeRenderMode = "standalone",
 ): string {
+  const toolSurface = composeToolSurfaceInstructions(unitType, { renderMode });
   const contextMode = renderContextModeBlockForPrompt(unitType, base, renderMode);
-  if (!contextMode) return block;
-  if (!block.trim()) return contextMode;
-  return `${contextMode}\n\n${block}`;
+  const guidance = [toolSurface, contextMode].filter(Boolean).join("\n\n");
+  if (!guidance) return block;
+  if (!block.trim()) return guidance;
+  return `${guidance}\n\n${block}`;
 }
 
 function requireUnitPromptContextContract(unitType: string): UnitPromptContextContract {
@@ -3850,18 +3853,22 @@ export async function buildReactiveExecutePrompt(
   const inlinedTemplates = inlineTemplate("task-summary", "Task Summary");
   trackPromptContext(contextTelemetry, "templates", "inline", inlinedTemplates);
 
-  const prompt = loadPrompt("reactive-execute", {
-    workingDirectory: base,
-    milestoneId: mid,
-    milestoneTitle: midTitle,
-    sliceId: sid,
-    sliceTitle: sTitle,
-    graphContext: prependContextModeToBlock("reactive-execute", base, graphContext),
-    readyTaskCount: String(readyTaskIds.length),
-    readyTaskList: readyTaskListLines.join("\n"),
-    subagentPrompts: subagentSections.join("\n\n---\n\n"),
-    inlinedTemplates,
-  });
+  const prompt = prependContextModeToBlock(
+    "reactive-execute",
+    base,
+    loadPrompt("reactive-execute", {
+      workingDirectory: base,
+      milestoneId: mid,
+      milestoneTitle: midTitle,
+      sliceId: sid,
+      sliceTitle: sTitle,
+      graphContext,
+      readyTaskCount: String(readyTaskIds.length),
+      readyTaskList: readyTaskListLines.join("\n"),
+      subagentPrompts: subagentSections.join("\n\n---\n\n"),
+      inlinedTemplates,
+    }),
+  );
   emitPromptContextTelemetry("reactive-execute", contextTelemetry, prompt);
   return prompt;
 }
@@ -4040,17 +4047,21 @@ export async function buildGateEvaluatePrompt(
     ].join("\n"));
   }
 
-  return loadPrompt("gate-evaluate", {
-    workingDirectory: base,
-    milestoneId: mid,
-    milestoneTitle: midTitle,
-    sliceId: sid,
-    sliceTitle: sTitle,
-    slicePlanContent: prependContextModeToBlock("gate-evaluate", base, planContent),
-    gateCount: String(pending.length),
-    gateList: gateListLines.join("\n"),
-    subagentPrompts: subagentSections.join("\n\n---\n\n"),
-  });
+  return prependContextModeToBlock(
+    "gate-evaluate",
+    base,
+    loadPrompt("gate-evaluate", {
+      workingDirectory: base,
+      milestoneId: mid,
+      milestoneTitle: midTitle,
+      sliceId: sid,
+      sliceTitle: sTitle,
+      slicePlanContent: planContent,
+      gateCount: String(pending.length),
+      gateList: gateListLines.join("\n"),
+      subagentPrompts: subagentSections.join("\n\n---\n\n"),
+    }),
+  );
 }
 
 export async function buildRewriteDocsPrompt(

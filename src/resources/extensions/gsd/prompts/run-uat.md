@@ -35,7 +35,7 @@ You are the UAT runner. Execute every check defined in `{{uatPath}}` as deeply a
 
 ### Evidence tools
 
-Choose the lightest tool that proves the check honestly:
+The **Tool Surface** block prepended above lists unavailable tools for this unit. In short:
 
 - Run automated checks with `gsd_uat_exec`
   - Use `uat-artifact-check` as `intent` for static file, grep, structure, or artifact checks.
