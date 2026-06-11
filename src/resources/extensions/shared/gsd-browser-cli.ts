@@ -115,6 +115,43 @@ export function resolveBundledGsdBrowserCliPath(env: NodeJS.ProcessEnv = process
   return null;
 }
 
+export type GsdBrowserCliAvailability =
+  | { available: true; via: "explicit-env" | "bundled" | "path"; detail: string }
+  | { available: false; detail: string };
+
+/**
+ * Cheap availability probe for the gsd-browser CLI: explicit env overrides,
+ * then the bundled @opengsd/gsd-browser binary (filesystem checks only), then
+ * a PATH lookup (one short subprocess). Used by Browser Automation Engine
+ * resolution to decide whether the managed engine is provable before
+ * preferring it over legacy Playwright.
+ */
+export function resolveGsdBrowserCliAvailability(env: NodeJS.ProcessEnv = process.env): GsdBrowserCliAvailability {
+  const explicitCommand = env.GSD_BROWSER_MCP_COMMAND?.trim();
+  if (explicitCommand) {
+    return { available: true, via: "explicit-env", detail: `GSD_BROWSER_MCP_COMMAND=${explicitCommand}` };
+  }
+
+  const explicitCliPath = env.GSD_BROWSER_CLI_PATH?.trim() || env.GSD_BROWSER_BIN_PATH?.trim();
+  if (explicitCliPath) {
+    return existsSync(explicitCliPath)
+      ? { available: true, via: "explicit-env", detail: `CLI at ${explicitCliPath}` }
+      : { available: false, detail: `configured gsd-browser CLI path does not exist: ${explicitCliPath}` };
+  }
+
+  const bundledCliPath = resolveBundledGsdBrowserCliPath(env);
+  if (bundledCliPath) {
+    return { available: true, via: "bundled", detail: `bundled CLI at ${bundledCliPath}` };
+  }
+
+  const pathVersion = resolvePathGsdBrowserVersion(env);
+  if (pathVersion) {
+    return { available: true, via: "path", detail: `gsd-browser ${pathVersion} on PATH` };
+  }
+
+  return { available: false, detail: "no bundled or PATH gsd-browser CLI found" };
+}
+
 export function buildGsdBrowserSessionName(projectRoot: string, suffix?: string): string {
   const resolvedProjectRoot = resolve(projectRoot);
   const base = sanitizeSessionSegment(basename(resolvedProjectRoot)) || "project";

@@ -2,7 +2,7 @@
 import { importExtensionModule, type ExtensionAPI, type ExtensionContext } from "@gsd/pi-coding-agent";
 
 import { closeManagedGsdBrowser, registerManagedGsdBrowserTools, warmUpManagedGsdBrowser } from "./engine/managed-gsd-browser.js";
-import { resolveBrowserEngineMode, type BrowserEngineMode } from "./engine/selection.js";
+import { resolveBrowserEngineResolution, type BrowserEngineMode } from "./engine/selection.js";
 import { setArtifactRootForCwd } from "./state.js";
 import { detectWebApp } from "./web-app-detect.js";
 
@@ -167,9 +167,34 @@ function withBrowserArtifactCwdScope(pi: ExtensionAPI): ExtensionAPI {
   };
 }
 
-async function registerBrowserTools(pi: ExtensionAPI): Promise<void> {
-  const engine = resolveBrowserEngineMode();
+/** Daemon-connect budget when the probe-resolved managed engine is verified at session start. */
+const PROBE_WARMUP_TIMEOUT_MS = 10_000;
+
+async function registerBrowserTools(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
+  const projectRoot = ctx.cwd || process.cwd();
+  const resolution = resolveBrowserEngineResolution(process.env, projectRoot);
+  let engine = resolution.engine;
   if (engine === "off") return;
+
+  // A probe-resolved managed engine is only a prediction that gsd-browser
+  // works — prove it by connecting the daemon before committing the session's
+  // tool registrations to it. Connect failure falls back to legacy Playwright
+  // (the failure mode that made ADR-024 freeze the old default). An explicit
+  // GSD_BROWSER_ENGINE=gsd-browser override skips the gate and is honored
+  // verbatim, matching prior behavior.
+  if (engine === "gsd-browser" && resolution.source === "probe" && !registeredEngine && !isWarmUpDisabled()) {
+    const warmUp = await warmUpManagedGsdBrowser(ctx, AbortSignal.timeout(PROBE_WARMUP_TIMEOUT_MS));
+    if (!warmUp.ok) {
+      engine = "legacy";
+      if (ctx.hasUI) {
+        ctx.ui.notify(
+          `gsd-browser engine unavailable (${warmUp.error}); using Playwright browser tools for this session.`,
+          "warning",
+        );
+      }
+    }
+  }
+
   if (registeredEngine && registeredEngine !== engine) {
     throw new Error(
       `Browser tools already registered with GSD_BROWSER_ENGINE=${registeredEngine}. Restart GSD before switching to ${engine}.`,
@@ -208,15 +233,17 @@ function isWarmUpDisabled(): boolean {
 }
 
 /**
- * Auto-initialize the managed gsd-browser engine only when explicitly selected
- * for a web app. Best-effort and non-blocking: warm-up runs in the background
- * and only surfaces a warning if it fails.
+ * Auto-initialize the managed gsd-browser engine for a web app. Best-effort and
+ * non-blocking: warm-up runs in the background and only surfaces a warning if
+ * it fails. Probe-resolved sessions already connected during registration, so
+ * this re-warm is a cached no-op there; it matters for the explicit
+ * GSD_BROWSER_ENGINE=gsd-browser override, which registers without the gate.
  */
 function maybeWarmUpManagedEngine(pi: ExtensionAPI, ctx: ExtensionContext): void {
   if (isWarmUpDisabled()) return;
-  if (resolveBrowserEngineMode() !== "gsd-browser") return;
 
   const projectRoot = ctx.cwd || process.cwd();
+  if (resolveBrowserEngineResolution(process.env, projectRoot).engine !== "gsd-browser") return;
   if (!detectWebApp(projectRoot)) return;
 
   void warmUpManagedGsdBrowser(ctx).then((result) => {
@@ -240,7 +267,7 @@ async function closeActiveBrowserEngines(): Promise<void> {
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     if (ctx.hasUI) {
-      void registerBrowserTools(pi)
+      void registerBrowserTools(pi, ctx)
         .then(() => maybeWarmUpManagedEngine(pi, ctx))
         .catch((error) => {
           ctx.ui.notify(`browser-tools failed to load: ${error instanceof Error ? error.message : String(error)}`, "warning");
@@ -248,7 +275,7 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    await registerBrowserTools(pi);
+    await registerBrowserTools(pi, ctx);
     maybeWarmUpManagedEngine(pi, ctx);
   });
 
