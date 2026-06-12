@@ -15,6 +15,15 @@ import { getLatestForUnit } from "../db/unit-dispatches.js";
  */
 const ENOENT_PATH_RE = /ENOENT[^']*'([^']+)'/;
 
+function rowInsideRetryBudget(row: ReturnType<typeof getLatestForUnit>): boolean {
+  if (!row) return false;
+  if (row.attempt_n >= row.max_attempts) return false;
+  if (!row.next_run_at) return false;
+  const nextRun = Date.parse(row.next_run_at);
+  if (!Number.isFinite(nextRun)) return false;
+  return nextRun > Date.now();
+}
+
 /**
  * Phase B / codex review MEDIUM B3 — retry coupling.
  *
@@ -24,19 +33,25 @@ const ENOENT_PATH_RE = /ENOENT[^']*'([^']+)'/;
  * waiting on its own backoff. Suppress the stuck verdict in that case so
  * the retry budget can fully drain before we declare stuck.
  *
+ * Window keys are compound (`unitType:unitId`, legacy `unitType/unitId`)
+ * while the production dispatch ledger keys rows by the bare unit id with
+ * the unit type in its own column. Look the full key up first (test
+ * fixtures / legacy rows), then fall back to the bare unit id with a
+ * unit_type match so production ledger rows also suppress.
+ *
  * Returns true if the dispatch ledger says we should suppress the stuck
  * signal; false (no suppression) when the ledger is unavailable or has
  * no opinion.
  */
-function retryBudgetSuppresses(unitKey: string): boolean {
+export function retryBudgetSuppresses(unitKey: string): boolean {
   try {
-    const latest = getLatestForUnit(unitKey);
-    if (!latest) return false;
-    if (latest.attempt_n >= latest.max_attempts) return false;
-    if (!latest.next_run_at) return false;
-    const nextRun = Date.parse(latest.next_run_at);
-    if (!Number.isFinite(nextRun)) return false;
-    return nextRun > Date.now();
+    if (rowInsideRetryBudget(getLatestForUnit(unitKey))) return true;
+    const separator = unitKey.includes(":") ? ":" : "/";
+    const split = unitKey.indexOf(separator);
+    if (split <= 0) return false;
+    const unitType = unitKey.slice(0, split);
+    const bare = getLatestForUnit(unitKey.slice(split + 1));
+    return !!bare && bare.unit_type === unitType && rowInsideRetryBudget(bare);
   } catch {
     return false;
   }
