@@ -11,6 +11,7 @@ import {
   composeContractedUnitContext,
   composeContextModeInstructions,
   composeInlinedContext,
+  composeToolSurfaceInstructions,
   composeUnitContext,
   manifestBudgetChars,
   type ArtifactResolver,
@@ -199,6 +200,49 @@ test("Context Mode composer: workflow-preferences and research-decision render n
   );
   assert.strictEqual(
     composeContextModeInstructions("research-decision", { enabled: true, renderMode: "standalone" }),
+    "",
+  );
+});
+
+test("Tool Surface composer: run-uat forbids gsd_exec and Bash", () => {
+  const out = composeToolSurfaceInstructions("run-uat", { renderMode: "standalone" });
+  assert.match(out, /^## Tool Surface/);
+  assert.match(out, /Do not call `gsd_exec`/);
+  assert.match(out, /`Bash`/);
+  assert.match(out, /`gsd_uat_exec`/);
+  assert.match(out, /`gsd_save_gate_result`/);
+  assert.match(out, /`gsd_summary_save`/);
+});
+
+test("Tool Surface composer: complete-slice steers verification to gsd_exec", () => {
+  const out = composeToolSurfaceInstructions("complete-slice", { renderMode: "standalone" });
+  assert.match(out, /`gsd_exec`/);
+  assert.match(out, /not direct `bash`/);
+  assert.match(out, /`gsd_uat_result_save`/);
+});
+
+test("Tool Surface composer: planning units restrict writes to .gsd", () => {
+  const out = composeToolSurfaceInstructions("discuss-milestone", { renderMode: "standalone" });
+  assert.match(out, /restricted to `\.gsd\/\*\*`/);
+  assert.match(out, /`ask_user_questions`/);
+});
+
+test("Tool Surface composer: planning-dispatch lists allowed subagents", () => {
+  const out = composeToolSurfaceInstructions("plan-slice", { renderMode: "standalone" });
+  assert.match(out, /\*\*scout\*\*/);
+  assert.match(out, /\*\*planner\*\*/);
+});
+
+test("Tool Surface composer: execute-task warns against slice/milestone closeout tools", () => {
+  const out = composeToolSurfaceInstructions("execute-task", { renderMode: "nested" });
+  assert.match(out, /^Tool surface: /);
+  assert.match(out, /`gsd_task_complete`/);
+  assert.match(out, /Do not call `gsd_slice_complete`/);
+});
+
+test("Tool Surface composer: unknown unit renders empty block", () => {
+  assert.strictEqual(
+    composeToolSurfaceInstructions("never-dispatched", { renderMode: "standalone" }),
     "",
   );
 });
