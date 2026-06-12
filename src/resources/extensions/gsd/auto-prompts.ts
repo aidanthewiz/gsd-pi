@@ -972,7 +972,7 @@ export async function inlineDecisionsFromDb(
 
 /**
  * Inline requirements with optional milestone and slice scoping from the DB.
- * Falls back to filesystem via inlineGsdRootFile when DB unavailable or empty.
+ * Falls back to filesystem via inlineGsdRootFile only when DB is unavailable.
  */
 export async function inlineRequirementsFromDb(
   base: string, milestoneId?: string, sliceId?: string, level?: InlineLevel,
@@ -982,14 +982,28 @@ export async function inlineRequirementsFromDb(
     const { isDbAvailable } = await import("./gsd-db.js");
     if (isDbAvailable()) {
       const { queryRequirements, formatRequirementsForPrompt } = await import("./context-store.js");
-      const requirements = queryRequirements({ milestoneId, sliceId });
+      let requirements = queryRequirements({ milestoneId, sliceId });
+      let broadenedScope = false;
+      if (requirements.length === 0 && sliceId) {
+        requirements = queryRequirements({ milestoneId });
+        broadenedScope = true;
+      }
+      if (requirements.length === 0 && milestoneId) {
+        requirements = queryRequirements({ status: "active" });
+        broadenedScope = true;
+      }
       if (requirements.length > 0) {
-        // Use compact format for non-full levels to save ~40% tokens
-        const formatted = inlineLevel !== "full"
+        // Use compact format for non-full levels, milestone-scoped calls, and
+        // any cascade stage that broadened past the originally requested scope —
+        // a slice-scoped "full" call that fell through to the project-wide
+        // active fallback must not format those rows as full requirements.
+        const useCompact = inlineLevel !== "full" || !sliceId || broadenedScope;
+        const formatted = useCompact
           ? formatRequirementsCompact(requirements)
           : formatRequirementsForPrompt(requirements);
         return `### Requirements\nSource: \`.gsd/REQUIREMENTS.md\`\n\n${formatted}`;
       }
+      return null;
     }
   } catch (err) {
     logWarning("prompt", `inlineRequirementsFromDb failed: ${err instanceof Error ? err.message : String(err)}`);
