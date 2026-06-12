@@ -364,7 +364,11 @@ function mutateWriteGateState(
   const state = getWriteGateState(basePath);
   if (shouldPersistWriteGateSnapshot() && (opts?.reconcile ?? true)) {
     const disk = readDiskSnapshot(basePath);
-    if (disk) mergeSnapshotIntoState(state, disk);
+    if (disk) {
+      mergeSnapshotIntoState(state, disk);
+    } else if (!existsSync(writeGateSnapshotPath(basePath))) {
+      replaceStateFromSnapshot(state, EMPTY_SNAPSHOT);
+    }
   }
   if (mutate(state) === false) return false;
   persistWriteGateSnapshot(basePath, opts?.writer ?? defaultWriteGateWriter());

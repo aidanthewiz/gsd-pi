@@ -202,6 +202,21 @@ test("seam: host persist re-merges a concurrent child write (unconditional read-
   assert.equal(readDiskRaw(dir).writer, "host");
 });
 
+test("seam: missing snapshot resets stale in-memory pending gate before mutation", (t) => {
+  const dir = makeTempDir("missing-snapshot-reset");
+  t.after(() => cleanup(dir));
+
+  assert.equal(setPendingGate(GATE, dir), true);
+  rmSync(snapshotPath(dir), { force: true });
+
+  markDepthVerified("M008", dir);
+
+  const snapshot = loadWriteGateSnapshot(dir);
+  assert.equal(snapshot.pendingGateId, null);
+  assert.deepEqual(snapshot.verifiedDepthMilestones, ["M008"]);
+  assert.equal(readDiskRaw(dir).pendingGateId, null);
+});
+
 test("seam: childWriteGateAdapter is write-through and stamps writer provenance", (t) => {
   const dir = makeTempDir("child-write-through");
   t.after(() => cleanup(dir));
