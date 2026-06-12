@@ -983,15 +983,22 @@ export async function inlineRequirementsFromDb(
     if (isDbAvailable()) {
       const { queryRequirements, formatRequirementsForPrompt } = await import("./context-store.js");
       let requirements = queryRequirements({ milestoneId, sliceId });
+      let broadenedScope = false;
       if (requirements.length === 0 && sliceId) {
         requirements = queryRequirements({ milestoneId });
+        broadenedScope = true;
       }
       if (requirements.length === 0 && milestoneId) {
         requirements = queryRequirements({ status: "active" });
+        broadenedScope = true;
       }
       if (requirements.length > 0) {
-        // Use compact format for non-full levels to save ~40% tokens
-        const formatted = inlineLevel !== "full" || !sliceId
+        // Use compact format for non-full levels, milestone-scoped calls, and
+        // any cascade stage that broadened past the originally requested scope —
+        // a slice-scoped "full" call that fell through to the project-wide
+        // active fallback must not format those rows as full requirements.
+        const useCompact = inlineLevel !== "full" || !sliceId || broadenedScope;
+        const formatted = useCompact
           ? formatRequirementsCompact(requirements)
           : formatRequirementsForPrompt(requirements);
         return `### Requirements\nSource: \`.gsd/REQUIREMENTS.md\`\n\n${formatted}`;

@@ -263,6 +263,49 @@ test('prompt-db: inlineRequirementsFromDb cascades from empty milestone query to
   }
 });
 
+test('prompt-db: inlineRequirementsFromDb keeps active fallback compact for slice-scoped full calls', async () => {
+  const { tmpDir } = createDbProjectWithRequirements(
+    '# Requirements\n\nFULL FILE SHOULD NOT BE INLINED\n',
+  );
+  try {
+    insertRequirement({
+      id: 'R001',
+      class: 'functional',
+      status: 'active',
+      description: 'active requirement for another milestone',
+      why: 'needed',
+      source: 'M001',
+      primary_owner: 'M001/S01',
+      supporting_slices: '',
+      validation: 'test',
+      notes: '',
+      full_content: '',
+      superseded_by: null,
+    });
+
+    // Slice-scoped call at inlineLevel "full" with no matching rows for the
+    // milestone+slice or milestone-only queries. The cascade should land on
+    // status: "active" rows from another milestone, and those project-wide
+    // active rows must be formatted compactly even though sliceId is set —
+    // otherwise the full per-requirement markdown would be inlined for every
+    // active row across the project.
+    const inlined = await inlineRequirementsFromDb(tmpDir, 'M999', 'S99', 'full');
+
+    assert.ok(inlined);
+    assert.match(inlined, /### Requirements/);
+    assert.match(inlined, /# Requirements \(compact\)/);
+    assert.match(inlined, /R001/);
+    // Full per-requirement markdown is forbidden here — its hallmark fields
+    // (Class:/Status:/Why: as bolded list items) are emitted only by
+    // formatRequirementsForPrompt, never by formatRequirementsCompact.
+    assert.doesNotMatch(inlined, /\*\*Class:\*\*/);
+    assert.doesNotMatch(inlined, /FULL FILE SHOULD NOT BE INLINED/);
+  } finally {
+    closeDatabase();
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // prompt-db: scoped filtering reduces content vs unscoped
 // ═══════════════════════════════════════════════════════════════════════════
