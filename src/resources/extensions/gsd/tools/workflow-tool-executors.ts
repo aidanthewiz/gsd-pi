@@ -1277,10 +1277,11 @@ export async function executePlanMilestone(
   let planningSucceeded = false;
   let leaseRefreshTimer: ReturnType<typeof setInterval> | undefined;
   try {
-    if (!getMilestone(params.milestoneId)) {
-      insertMilestone({ id: params.milestoneId, title: params.milestoneId, status: "queued" });
-      insertedPlaceholder = true;
-    }
+    insertedPlaceholder = insertMilestone({
+      id: params.milestoneId,
+      title: params.milestoneId,
+      status: "queued",
+    });
 
     const lease = claimMilestoneLease(workerId, params.milestoneId);
     if (!lease.ok) {
