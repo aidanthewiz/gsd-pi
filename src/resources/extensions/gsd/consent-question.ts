@@ -26,7 +26,14 @@
  * prose menus) by construction.
  */
 
-import { isDepthConfirmationAnswer, isGateQuestionId } from "./bootstrap/write-gate.js";
+import { isGateQuestionId } from "./bootstrap/write-gate.js";
+import {
+  evaluateGateAnswer,
+  hasNotesValue,
+  hasSelectedValue,
+  type VerdictAnswerDetails,
+  type VerdictQuestionShape,
+} from "./consent-verdict.js";
 import { isDestructiveConfirmGateId } from "./safety/destructive-confirmation.js";
 
 // ── Taxonomy ────────────────────────────────────────────────────────────────
@@ -102,24 +109,7 @@ export function hasResearchDecisionQuestion(text: string): boolean {
 
 // ── Message text extraction (moved from user-input-boundary) ────────────────
 
-function extractVisibleTextFromMessage(msg: unknown): string {
-  if (!msg || typeof msg !== "object") return "";
-  const content = (msg as { content?: unknown }).content;
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  const parts: string[] = [];
-  for (const block of content) {
-    if (!block || typeof block !== "object") continue;
-    const typed = block as { type?: unknown; text?: unknown };
-    if (typed.type === "text" && typeof typed.text === "string") {
-      parts.push(typed.text);
-    }
-    // thinking blocks intentionally excluded — they are internal reasoning, not user-visible
-  }
-  return parts.join("\n");
-}
-
-function extractTextFromMessage(msg: unknown): string {
+function extractMessageText(msg: unknown, includeThinking: boolean): string {
   if (!msg || typeof msg !== "object") return "";
   const content = (msg as { content?: unknown }).content;
   if (typeof content === "string") return content;
@@ -131,43 +121,45 @@ function extractTextFromMessage(msg: unknown): string {
     if (typed.type === "text" && typeof typed.text === "string") {
       parts.push(typed.text);
     }
-    if (typed.type === "thinking" && typeof typed.thinking === "string") {
+    // Thinking blocks are internal reasoning, not user-visible — included only
+    // when the caller asks for the full transcript text.
+    if (includeThinking && typed.type === "thinking" && typeof typed.thinking === "string") {
       parts.push(typed.thinking);
     }
   }
   return parts.join("\n");
 }
 
-export function lastAssistantText(messages: unknown[] | null | undefined): string {
+function lastAssistantMessageText(
+  messages: unknown[] | null | undefined,
+  includeThinking: boolean,
+): string {
   if (!Array.isArray(messages)) return "";
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (!msg || typeof msg !== "object") continue;
     if ((msg as { role?: unknown }).role !== "assistant") continue;
-    const text = extractTextFromMessage(msg).trim();
+    const text = extractMessageText(msg, includeThinking).trim();
     if (text) return text;
   }
   return "";
+}
+
+export function lastAssistantText(messages: unknown[] | null | undefined): string {
+  return lastAssistantMessageText(messages, true);
 }
 
 function lastAssistantVisibleText(messages: unknown[] | null | undefined): string {
-  if (!Array.isArray(messages)) return "";
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
-    if (!msg || typeof msg !== "object") continue;
-    if ((msg as { role?: unknown }).role !== "assistant") continue;
-    const text = extractVisibleTextFromMessage(msg).trim();
-    if (text) return text;
-  }
-  return "";
+  return lastAssistantMessageText(messages, false);
 }
 
-function anyMessageMatches(messages: unknown[] | undefined, pattern: RegExp): boolean {
+function anyMessageMatches(messages: unknown[] | undefined, patterns: RegExp[]): boolean {
   if (!Array.isArray(messages)) return false;
   return messages.some((msg) => {
     if (!msg || typeof msg !== "object") return false;
     if ((msg as { role?: unknown }).role === "user") return false;
-    return pattern.test(extractVisibleTextFromMessage(msg));
+    const text = extractMessageText(msg, false);
+    return patterns.some((pattern) => pattern.test(text));
   });
 }
 
@@ -220,35 +212,17 @@ export function classifyQuestion(input: ClassifyQuestionInput): ClassifiedQuesti
 
 // ── Answer validation ───────────────────────────────────────────────────────
 
-export interface ConsentQuestionShape {
-  id?: unknown;
-  options?: Array<{ label?: string }>;
-}
-
-export interface ConsentAnswerDetails {
-  cancelled?: boolean;
-  interrupted?: boolean;
-  response?: {
-    answers?: Record<string, { selected?: unknown; notes?: unknown } | undefined>;
-  } | null;
-}
-
-function hasSelectedValue(selected: unknown): boolean {
-  if (Array.isArray(selected)) {
-    return selected.some((value) => typeof value === "string" && value.length > 0);
-  }
-  return typeof selected === "string" && selected.length > 0;
-}
-
-function hasNotesValue(notes: unknown): boolean {
-  return typeof notes === "string" && notes.trim().length > 0;
-}
+// The question/answer shapes are the consent-verdict leaf's shapes — one
+// definition shared with write-gate so the two consumers cannot drift.
+export type ConsentQuestionShape = VerdictQuestionShape;
+export type ConsentAnswerDetails = VerdictAnswerDetails;
 
 /**
  * THE single policy point for whether a question's answer counts as answered.
  *
  * - cancelled rounds → "cancelled" for every kind.
- * - gate: delegates structural validation to isDepthConfirmationAnswer;
+ * - gate: delegates to evaluateGateAnswer in the consent-verdict leaf — the
+ *   same verdict engine write-gate's applyAskUserQuestionsGateResult consumes;
  *   confirm option → "verified", any other real selection → "declined",
  *   empty/missing → "waiting" (fail-closed).
  * - consent/decision: a non-empty selection or non-empty notes → "answered";
@@ -265,16 +239,14 @@ export function evaluateAnswer(options: {
   const { kind } = classifyQuestion({ id: question.id, options: question.options });
   if (failPolicyForKind(kind) === "open") return "answered";
 
-  const questionId = typeof question.id === "string" ? question.id : "";
-  const answer = details.response?.answers?.[questionId];
-
   if (kind === "gate") {
     // Gates keep strict structural validation: only the confirmation option
     // verifies; notes never satisfy a gate.
-    if (isDepthConfirmationAnswer(answer?.selected, question.options)) return "verified";
-    if (hasSelectedValue(answer?.selected)) return "declined";
-    return "waiting";
+    return evaluateGateAnswer(question, details);
   }
+
+  const questionId = typeof question.id === "string" ? question.id : "";
+  const answer = details.response?.answers?.[questionId];
 
   if (hasSelectedValue(answer?.selected)) return "answered";
   // Notes-only is a real user utterance for consent/decision questions, but
@@ -328,23 +300,41 @@ export function formatUnansweredConsentQuestionMessage(questions: ConsentQuestio
 // ── Pause gating (replaces the unit-type allowlist) ─────────────────────────
 
 /**
+ * Shared preamble for the awaiting-input predicates: cancellation and remote
+ * delivery failures always pause (an undelivered question can never be
+ * answered, so proceeding would be fail-open), as does an explicit
+ * "waiting for your approval/input" phrase in the last assistant text.
+ *
+ * Returns `forced: true` when the boundary is unconditional, plus the last
+ * assistant visible text for the caller's own classification.
+ */
+function awaitingBoundary(messages: unknown[] | undefined): { forced: boolean; text: string } {
+  if (anyMessageMatches(messages, [ASK_USER_QUESTIONS_CANCELLED_RE, REMOTE_QUESTION_FAILURE_RE])) {
+    return { forced: true, text: "" };
+  }
+  const text = lastAssistantVisibleText(messages);
+  if (text && APPROVAL_WAIT_RE.test(text)) return { forced: true, text };
+  return { forced: false, text };
+}
+
+/**
  * Decide whether the assistant should pause for a prose user question.
  *
  * Unlike the retired USER_APPROVAL_UNIT_TYPES allowlist, this pauses for any
  * classified consent/decision question regardless of unit type — including
- * interactive mode where no unit is active (#682). Cancellation and remote
- * delivery failures always pause: an undelivered question can never be
- * answered, so proceeding would be fail-open.
+ * interactive mode where no unit is active (#682).
  */
 export function shouldPauseForQuestion(
   unitType: string | undefined,
   messages: unknown[] | undefined,
 ): boolean {
-  if (anyMessageMatches(messages, ASK_USER_QUESTIONS_CANCELLED_RE)) return true;
-  if (anyMessageMatches(messages, REMOTE_QUESTION_FAILURE_RE)) return true;
-  const text = lastAssistantVisibleText(messages);
-  if (!text) return false;
-  if (APPROVAL_WAIT_RE.test(text)) return true;
+  const { forced, text } = awaitingBoundary(messages);
+  if (forced) return true;
+  // Streaming hot path: this runs on every message_update for every unit type.
+  // The classifiers only ever match question-mark-terminated fragments, so
+  // text without a "?" can never classify as consent/decision — bail before
+  // the multi-regex scan.
+  if (!text || !text.includes("?")) return false;
   const { kind } = classifyQuestion({ text, unitType });
   return kind === "consent" || kind === "decision";
 }
@@ -352,23 +342,18 @@ export function shouldPauseForQuestion(
 // ── Awaiting-input boundaries (moved from user-input-boundary) ──────────────
 
 export function isAwaitingUserInput(messages: unknown[] | undefined): boolean {
-  if (anyMessageMatches(messages, ASK_USER_QUESTIONS_CANCELLED_RE)) return true;
-  if (anyMessageMatches(messages, REMOTE_QUESTION_FAILURE_RE)) return true;
-  const text = lastAssistantVisibleText(messages);
+  const { forced, text } = awaitingBoundary(messages);
+  if (forced) return true;
   if (!text) return false;
-  if (APPROVAL_WAIT_RE.test(text)) return true;
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   if (lines.some((line) => line.endsWith("?"))) return true;
   return hasApprovalQuestion(text);
 }
 
 export function isAwaitingApprovalBoundary(messages: unknown[] | undefined): boolean {
-  if (anyMessageMatches(messages, ASK_USER_QUESTIONS_CANCELLED_RE)) return true;
-  if (anyMessageMatches(messages, REMOTE_QUESTION_FAILURE_RE)) return true;
-  const text = lastAssistantVisibleText(messages);
-  if (!text) return false;
-  if (APPROVAL_WAIT_RE.test(text)) return true;
-  return hasApprovalQuestion(text);
+  // With no unit type, classification reduces to the approval detectors —
+  // exactly the approval boundary.
+  return shouldPauseForQuestion(undefined, messages);
 }
 
 // ── Approval gate ids + explicit responses (moved from user-input-boundary) ─

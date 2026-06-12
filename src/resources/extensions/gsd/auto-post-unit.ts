@@ -18,7 +18,7 @@ import { deriveState } from "./state.js";
 import { logWarning, logError } from "./workflow-logger.js";
 import { loadFile, parseSummary, resolveAllOverrides } from "./files.js";
 import { loadPrompt } from "./prompt-loader.js";
-import { isAwaitingUserInput } from "./user-input-boundary.js";
+import { isAwaitingUserInput } from "./consent-question.js";
 import {
   resolveMilestonePath,
   resolveSliceFile,
@@ -901,7 +901,7 @@ export const USER_DRIVEN_DEEP_UNITS = new Set([
   "discuss-milestone",
   "research-decision",
 ]);
-export { isAwaitingUserInput } from "./user-input-boundary.js";
+export { isAwaitingUserInput } from "./consent-question.js";
 
 function artifactValidationKind(unitType: string): "project" | "requirements" | null {
   if (unitType === "discuss-project") return "project";

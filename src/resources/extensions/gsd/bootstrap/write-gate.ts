@@ -12,6 +12,7 @@ import { compileSubagentPermissionContract, type ToolsPolicy } from "../unit-con
 import { logWarning } from "../workflow-logger.js";
 import { isGsdWorktreePath, resolveWorktreeProjectRoot } from "../worktree-root.js";
 import { worktreesDirs } from "../worktree-placement.js";
+import { evaluateGateAnswer } from "../consent-verdict.js";
 
 /**
  * Regex matching milestone CONTEXT.md file names in both legacy M001
@@ -708,34 +709,12 @@ export function shouldBlockPendingGateBashInSnapshot(
   };
 }
 
-/**
- * Check whether a depth_verification answer confirms the discussion is complete.
- * Uses structural validation: the selected answer must exactly match the first
- * option label from the question definition (the confirmation option by convention).
- * This rejects free-form "Other" text, decline options, and garbage input without
- * coupling to any specific label substring.
- *
- * @param selected  The answer's selected value from details.response.answers[id].selected
- * @param options   The question's options array from event.input.questions[n].options
- */
-export function isDepthConfirmationAnswer(
-  selected: unknown,
-  options?: Array<{ label?: string }>,
-): boolean {
-  const value = Array.isArray(selected) ? selected[0] : selected;
-  if (typeof value !== "string" || !value) return false;
-
-  // If options are available, structurally validate: selected must exactly match
-  // the first option (confirmation) label. Rejects free-form "Other" and decline options.
-  if (Array.isArray(options) && options.length > 0) {
-    const confirmLabel = options[0]?.label;
-    return typeof confirmLabel === "string" && value === confirmLabel;
-  }
-
-  // Fail-closed: no options means we cannot structurally validate the answer.
-  // Returning false prevents any free-form string from unlocking the gate.
-  return false;
-}
+// The structural depth-confirmation validator lives in the consent-verdict
+// leaf (../consent-verdict.ts) so the write gate and the Consent Question
+// module share one verdict engine without an import cycle. Re-exported here
+// because the workflow MCP child loads this module by dist path and validates
+// the function is present (packages/mcp-server/src/server.ts).
+export { isDepthConfirmationAnswer } from "../consent-verdict.js";
 
 export interface AskUserQuestionsGateQuestion {
   id?: unknown;
@@ -754,20 +733,13 @@ export type AskUserQuestionsGateResult =
   | { status: "not-gate" }
   | { status: "waiting"; pendingGateId: string; interrupted: boolean }
   | { status: "verified"; gateId: string; milestoneId: string | null }
-  | { status: "answered"; gateId: string };
+  | { status: "declined"; gateId: string };
 
 function findGateQuestion(
   questions: AskUserQuestionsGateQuestion[],
   gateId: string,
 ): AskUserQuestionsGateQuestion | undefined {
   return questions.find((question) => question?.id === gateId);
-}
-
-function readSelectedGateAnswer(
-  details: AskUserQuestionsGateDetails,
-  questionId: string,
-): unknown {
-  return details.response?.answers?.[questionId]?.selected;
 }
 
 function verifyAnsweredGate(
@@ -783,6 +755,34 @@ function verifyAnsweredGate(
   return { status: "verified", gateId, milestoneId };
 }
 
+/** Map an unresolved (non-verified) gate verdict to the caller-facing result. */
+function unresolvedGateResult(
+  verdict: "declined" | "waiting" | "cancelled",
+  gateId: string,
+  details: AskUserQuestionsGateDetails,
+): AskUserQuestionsGateResult {
+  if (verdict === "declined") return { status: "declined", gateId };
+  // "waiting" (and the unreachable post-cancel case): an empty selection is
+  // not an answer — keep the gate pending and make the caller pause.
+  return {
+    status: "waiting",
+    pendingGateId: gateId,
+    interrupted: details.interrupted === true,
+  };
+}
+
+/**
+ * Apply an ask_user_questions round to durable gate state. The per-question
+ * VERDICT comes from the consent-verdict leaf (evaluateGateAnswer) — the same
+ * engine the Consent Question module uses — so write-gate only owns the
+ * persistence/arming side effects:
+ *
+ * - "verified" verdict → markApprovalGateVerified/markDepthVerified/clearPendingGate.
+ * - "declined" verdict → no state change; the gate (if armed) stays pending.
+ * - "waiting" verdict (empty/missing selection) → no state change; reported as
+ *   "waiting" so callers pause instead of proceeding (fail-closed; an empty
+ *   answer is never an answer).
+ */
 export function applyAskUserQuestionsGateResult(options: {
   basePath: string;
   questions: AskUserQuestionsGateQuestion[];
@@ -802,11 +802,11 @@ export function applyAskUserQuestionsGateResult(options: {
 
     const pendingQuestion = findGateQuestion(questions, currentPendingGate);
     if (pendingQuestion) {
-      const selected = readSelectedGateAnswer(details, currentPendingGate);
-      if (isDepthConfirmationAnswer(selected, pendingQuestion.options)) {
+      const verdict = evaluateGateAnswer(pendingQuestion, details);
+      if (verdict === "verified") {
         return verifyAnsweredGate(basePath, pendingQuestion, fallbackMilestoneId);
       }
-      return { status: "answered", gateId: currentPendingGate };
+      return unresolvedGateResult(verdict, currentPendingGate, details);
     }
   }
 
@@ -814,12 +814,14 @@ export function applyAskUserQuestionsGateResult(options: {
 
   for (const question of questions) {
     if (typeof question.id !== "string" || !isGateQuestionId(question.id)) continue;
-    const selected = readSelectedGateAnswer(details, question.id);
-    if (!isDepthConfirmationAnswer(selected, question.options)) {
-      return { status: "answered", gateId: question.id };
+    const verdict = evaluateGateAnswer(question, details);
+    if (verdict !== "verified") {
+      return unresolvedGateResult(verdict, question.id, details);
     }
     if (currentPendingGate && question.id !== currentPendingGate) {
-      return { status: "answered", gateId: currentPendingGate };
+      // A different gate than the armed one was confirmed — the armed gate is
+      // still unresolved, so do not verify and let discussion continue.
+      return { status: "declined", gateId: currentPendingGate };
     }
     return verifyAnsweredGate(basePath, question, fallbackMilestoneId);
   }

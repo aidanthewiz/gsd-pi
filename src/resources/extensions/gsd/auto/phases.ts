@@ -19,7 +19,7 @@ import {
   type PostUnitContext,
   type PreVerificationOpts,
 } from "../auto-post-unit.js";
-import { lastAssistantText } from "../user-input-boundary.js";
+import { lastAssistantText } from "../consent-question.js";
 import { resolveEffectiveUnitIsolationMode } from "../preferences.js";
 import type { Phase } from "../types.js";
 import {

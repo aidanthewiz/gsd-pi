@@ -56,13 +56,11 @@ import { resolveWorktreeProjectRoot } from "../worktree-root.js";
 import { extractSubagentAgentClasses } from "./subagent-input.js";
 import {
   approvalGateIdForUnit,
-  isExplicitApprovalResponse,
-  messageHasPendingAskUserQuestionsTool,
-  shouldPauseForUserApprovalQuestion,
-} from "../user-input-boundary.js";
-import {
   evaluateAskUserQuestionsRound,
   formatUnansweredConsentQuestionMessage,
+  isExplicitApprovalResponse,
+  messageHasPendingAskUserQuestionsTool,
+  shouldPauseForQuestion,
 } from "../consent-question.js";
 import { resolveSkillManifest } from "../skill-manifest.js";
 import { applyUnitSkillVisibility, unitHasSkillManifest } from "../skill-scope.js";
@@ -1164,7 +1162,7 @@ export function registerHooks(
       }
     }
 
-    if (!shouldPauseForUserApprovalQuestion(unitType, [event.message])) return;
+    if (!shouldPauseForQuestion(unitType, [event.message])) return;
 
     const gateId = approvalGateIdForUnit(unitType, unitId);
     if (gateId) {
@@ -1551,10 +1549,11 @@ export function registerHooks(
     }
 
     // ── Consent Question policy (consent-question.ts): one home for the
-    // answer lifecycle of every ask_user_questions round. Gate persistence is
-    // handled by applyAskUserQuestionsGateResult above; this evaluates the
-    // round's fail policy so empty answers on fail-closed kinds never pass as
-    // real answers (#528) and cancellations get one unified handler.
+    // answer lifecycle of every ask_user_questions round. Per-question
+    // verdicts come from the consent-verdict leaf — the same engine
+    // applyAskUserQuestionsGateResult consumed above for gate persistence —
+    // so empty answers on fail-closed kinds never pass as real answers (#528)
+    // and cancellations get one unified handler.
     const roundOutcome = evaluateAskUserQuestionsRound(questions, details ?? {});
     if (roundOutcome === "cancelled") {
       resetToolCallLoopGuard();
@@ -1586,7 +1585,8 @@ export function registerHooks(
       };
     }
 
-    if (details?.cancelled || !details?.response) return;
+    // Cancelled rounds already returned via roundOutcome === "cancelled".
+    if (!details?.response) return;
 
     // Destructive-command confirmation: an affirmative answer to a
     // destructive_confirm gate promotes the pending blocked command to a

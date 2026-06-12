@@ -8,6 +8,9 @@ import {
   evaluateAskUserQuestionsRound,
   failPolicyForKind,
   formatUnansweredConsentQuestionMessage,
+  isAwaitingUserInput,
+  lastAssistantText,
+  messageHasPendingAskUserQuestionsTool,
   shouldPauseForQuestion,
 } from "../consent-question.ts";
 
@@ -163,4 +166,171 @@ test("shouldPauseForQuestion: plain non-approval question does not pause", () =>
   // matches the historical contract in deep-project-auto-loop tests.
   const messages = [assistantMessage("Which file did you mean?")];
   assert.equal(shouldPauseForQuestion("discuss-project", messages), false);
+});
+
+test("shouldPauseForQuestion: explicit waiting-for-approval phrase pauses without a question mark", () => {
+  // The streaming pre-filter (no "?" → bail) must not skip the explicit
+  // wait-phrase boundary, which carries no question mark.
+  const messages = [assistantMessage("I am waiting for your approval before writing the file.")];
+  assert.equal(shouldPauseForQuestion(undefined, messages), true);
+});
+
+// ── Message-text extraction (merged from user-input-boundary tests) ─────────
+
+test("lastAssistantText extracts the latest assistant text block content", () => {
+  assert.equal(
+    lastAssistantText([
+      { role: "assistant", content: "Older message" },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "First line" },
+          { type: "text", text: "Second line" },
+        ],
+      },
+    ]),
+    "First line\nSecond line",
+  );
+  assert.equal(lastAssistantText(null), "");
+});
+
+test("lastAssistantText includes thinking blocks so rate-limit notices are not dropped", () => {
+  // Turn with only a thinking block (no text block) — must not return ""
+  const result = lastAssistantText([
+    {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "You've hit your limit · resets in 2h" },
+      ],
+    },
+  ]);
+  assert.ok(result.includes("You've hit your limit"), `expected rate-limit text, got: ${JSON.stringify(result)}`);
+});
+
+// ── Awaiting-input boundaries (merged from user-input-boundary tests) ───────
+
+test("isAwaitingUserInput does not trigger on thinking-block question marks", () => {
+  // A thinking block with a question mark must NOT pause auto-mode —
+  // it's internal reasoning, not a user-visible prompt.
+  const messages = [
+    {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "Should I skip research? Let me check the config." },
+      ],
+    },
+  ];
+  assert.equal(isAwaitingUserInput(messages), false);
+  assert.equal(shouldPauseForQuestion("discuss-project", messages), false);
+});
+
+test("isAwaitingUserInput does not trigger on thinking-block approval phrases", () => {
+  // A thinking block with approval phrases must NOT pause auto-mode.
+  const messages = [
+    {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "The user confirmed and approved the plan. Should I proceed?" },
+      ],
+    },
+  ];
+  assert.equal(isAwaitingUserInput(messages), false);
+  assert.equal(shouldPauseForQuestion("discuss-requirements", messages), false);
+});
+
+test("isAwaitingUserInput still triggers on text-block question marks when thinking is also present", () => {
+  // When thinking + text are both present and the text asks a question, it should still pause.
+  const messages = [
+    {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "Internal reasoning without questions." },
+        { type: "text", text: "Does this look correct?" },
+      ],
+    },
+  ];
+  assert.equal(isAwaitingUserInput(messages), true);
+});
+
+// ── In-flight ask_user_questions detection (merged from user-input-boundary) ─
+
+test("messageHasPendingAskUserQuestionsTool detects in-flight structured question tools", () => {
+  // state: "running" with no externalResult → still in-flight
+  assert.equal(
+    messageHasPendingAskUserQuestionsTool({
+      role: "assistant",
+      content: [
+        { type: "text", text: "Which direction?" },
+        { type: "toolCall", name: "mcp__gsd-workflow__ask_user_questions", state: "running" },
+      ],
+    }),
+    true,
+  );
+
+  // no state, no externalResult — streaming block that hasn't completed yet
+  assert.equal(
+    messageHasPendingAskUserQuestionsTool({
+      role: "assistant",
+      content: [
+        { type: "toolCall", name: "ask_user_questions" },
+      ],
+    }),
+    true,
+  );
+
+  // state: "completed" — legacy state-based completion
+  assert.equal(
+    messageHasPendingAskUserQuestionsTool({
+      role: "assistant",
+      content: [
+        { type: "toolCall", name: "ask_user_questions", state: "completed" },
+      ],
+    }),
+    false,
+  );
+
+  // externalResult present — Claude Code signals completion via externalResult, not state
+  assert.equal(
+    messageHasPendingAskUserQuestionsTool({
+      role: "assistant",
+      content: [
+        { type: "toolCall", name: "ask_user_questions", externalResult: { content: [], isError: false } },
+      ],
+    }),
+    false,
+  );
+  assert.equal(
+    messageHasPendingAskUserQuestionsTool({
+      role: "assistant",
+      content: [
+        {
+          type: "toolCall",
+          name: "ask_user_questions",
+          externalResult: { content: [{ type: "text", text: "answer" }], isError: false },
+        },
+      ],
+    }),
+    false,
+  );
+
+  // serverToolUse shape (claude-code-cli MCP path) — no externalResult → in-flight
+  assert.equal(
+    messageHasPendingAskUserQuestionsTool({
+      role: "assistant",
+      content: [
+        { type: "serverToolUse", name: "mcp__gsd-workflow__ask_user_questions" },
+      ],
+    }),
+    true,
+  );
+  // serverToolUse shape — externalResult present → completed
+  assert.equal(
+    messageHasPendingAskUserQuestionsTool({
+      role: "assistant",
+      content: [
+        { type: "serverToolUse", name: "ask_user_questions", externalResult: { content: [], isError: false } },
+      ],
+    }),
+    false,
+  );
 });

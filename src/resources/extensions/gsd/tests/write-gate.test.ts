@@ -463,6 +463,66 @@ test('write-gate: applyAskUserQuestionsGateResult verifies confirmed pending gat
   }
 });
 
+test('write-gate: applyAskUserQuestionsGateResult reports declined pending gate (consent-verdict semantics)', () => {
+  const base = join(tmpdir(), `gsd-write-gate-ask-declined-${randomUUID()}`);
+  const gateId = 'depth_verification_M001_confirm';
+
+  try {
+    mkdirSync(base, { recursive: true });
+    clearDiscussionFlowState(base);
+    setPendingGate(gateId, base);
+
+    const result = applyAskUserQuestionsGateResult({
+      basePath: base,
+      questions: [{
+        id: gateId,
+        options: [{ label: 'Confirm depth (Recommended)' }, { label: 'Needs adjustment' }],
+      }],
+      details: {
+        response: { answers: { [gateId]: { selected: 'Needs adjustment' } } },
+      },
+    });
+
+    assert.deepEqual(result, { status: 'declined', gateId });
+    assert.strictEqual(getPendingGate(base), gateId, 'declined gate must stay pending');
+    assert.strictEqual(isMilestoneDepthVerified('M001', base), false, 'declined gate must not verify depth');
+  } finally {
+    clearDiscussionFlowState(base);
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('write-gate: applyAskUserQuestionsGateResult keeps empty-selection pending gate waiting (consent-verdict semantics)', () => {
+  // An empty selection is never an answer (fail-closed): the round used to
+  // report "answered" here, silently treating a missing selection as resolved.
+  const base = join(tmpdir(), `gsd-write-gate-ask-empty-${randomUUID()}`);
+  const gateId = 'depth_verification_M001_confirm';
+
+  try {
+    mkdirSync(base, { recursive: true });
+    clearDiscussionFlowState(base);
+    setPendingGate(gateId, base);
+
+    const result = applyAskUserQuestionsGateResult({
+      basePath: base,
+      questions: [{
+        id: gateId,
+        options: [{ label: 'Confirm depth (Recommended)' }, { label: 'Needs adjustment' }],
+      }],
+      details: {
+        response: { answers: { [gateId]: { selected: '' } } },
+      },
+    });
+
+    assert.deepEqual(result, { status: 'waiting', pendingGateId: gateId, interrupted: false });
+    assert.strictEqual(getPendingGate(base), gateId, 'unanswered gate must stay pending');
+    assert.strictEqual(isMilestoneDepthVerified('M001', base), false, 'unanswered gate must not verify depth');
+  } finally {
+    clearDiscussionFlowState(base);
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 // ─── Scenario 21: shouldBlockPendingGate blocks non-safe tools when gate is pending ──
 
 test('write-gate: shouldBlockPendingGate blocks write/edit during pending gate', () => {
