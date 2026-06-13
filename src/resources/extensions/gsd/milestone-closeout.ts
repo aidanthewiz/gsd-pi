@@ -16,9 +16,7 @@ import {
   getMilestoneSlices,
   isDbAvailable,
 } from "./gsd-db.js";
-import { parseRoadmap as parseLegacyRoadmap } from "./parsers-legacy.js";
 import { isClosedStatus } from "./status-guards.js";
-import { isMilestoneComplete } from "./state.js";
 import { resolveExpectedArtifactPath } from "./auto-artifact-paths.js";
 import { handleCompleteMilestone } from "./tools/complete-milestone.js";
 import { runSafely } from "./auto-utils.js";
@@ -42,39 +40,32 @@ const COMPLETE_MILESTONE_DB_SETTLE_POLL_MS = 100;
 
 /**
  * True when a milestone is terminal for git cleanup (orphaned worktrees, stale branches).
- * DB-authoritative when available: complete status, or validation-pass with all slices closed.
- * Legacy fallback requires SUMMARY + roadmap completion when the DB is unavailable.
+ * DB-authoritative (ADR-017): closed status, or validation-pass with all slices closed.
+ * When the DB is unavailable we cannot make this decision and conservatively
+ * return false so callers leave the worktree/branch alone instead of cleaning
+ * up based on parsed projections.
  */
 export async function isCompletedMilestoneTerminal(
-  basePath: string,
+  _basePath: string,
   milestoneId: string,
 ): Promise<boolean> {
-  if (isDbAvailable()) {
-    const milestone = getMilestone(milestoneId);
-    if (!milestone) return false;
+  if (!isDbAvailable()) return false;
 
-    if (isClosedStatus(milestone.status)) {
-      return true;
-    }
+  const milestone = getMilestone(milestoneId);
+  if (!milestone) return false;
 
-    const validation = getLatestAssessmentByScope(milestoneId, "milestone-validation");
-    if (validation?.status !== "pass") {
-      return false;
-    }
-
-    const slices = getMilestoneSlices(milestoneId);
-    if (slices.length === 0) return false;
-    return slices.every((slice) => isClosedStatus(slice.status));
+  if (isClosedStatus(milestone.status)) {
+    return true;
   }
 
-  const summaryPath = resolveMilestoneFile(basePath, milestoneId, "SUMMARY");
-  if (!summaryPath) return false;
+  const validation = getLatestAssessmentByScope(milestoneId, "milestone-validation");
+  if (validation?.status !== "pass") {
+    return false;
+  }
 
-  const roadmapPath = resolveMilestoneFile(basePath, milestoneId, "ROADMAP");
-  const roadmapContent = roadmapPath ? await loadFile(roadmapPath) : null;
-  if (!roadmapContent) return false;
-  const roadmap = parseLegacyRoadmap(roadmapContent);
-  return isMilestoneComplete(roadmap);
+  const slices = getMilestoneSlices(milestoneId);
+  if (slices.length === 0) return false;
+  return slices.every((slice) => isClosedStatus(slice.status));
 }
 
 /** Write a missing milestone SUMMARY projection when canonical DB closeout already settled. */

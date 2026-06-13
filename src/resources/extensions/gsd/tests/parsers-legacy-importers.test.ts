@@ -52,7 +52,6 @@ const ALLOWED_IMPORTERS = new Set([
   "gsd/auto-recovery.ts",
   // diagnostics-only surfaces: report on projections, make no dispatch decisions
   "gsd/doctor.ts",
-  "gsd/doctor-git-checks.ts",
   // display/telemetry-only surfaces
   "gsd/workspace-index.ts",
   "gsd/visualizer-data.ts",
