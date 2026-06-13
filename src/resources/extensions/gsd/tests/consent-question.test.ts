@@ -238,6 +238,21 @@ test("isAwaitingUserInput does not trigger on thinking-block approval phrases", 
   assert.equal(shouldPauseForQuestion("discuss-requirements", messages), false);
 });
 
+test("isAwaitingUserInput treats plain-text next steps menus as waiting for the user (#454)", () => {
+  const messages = [
+    {
+      role: "assistant",
+      content: [
+        "Next steps:",
+        "1. Walk through the runtime placement check above.",
+        "2. Build a release once you're satisfied.",
+        "3. Other.",
+      ].join("\n"),
+    },
+  ];
+  assert.equal(isAwaitingUserInput(messages), true);
+});
+
 test("isAwaitingUserInput still triggers on text-block question marks when thinking is also present", () => {
   // When thinking + text are both present and the text asks a question, it should still pause.
   const messages = [

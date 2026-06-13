@@ -107,6 +107,20 @@ export function hasResearchDecisionQuestion(text: string): boolean {
   return hasQuestionMatching(text, [RESEARCH_DECISION_QUESTION_RE]);
 }
 
+/**
+ * Detect a plain-text "Next steps:" menu — numbered options with an "Other"
+ * choice — emitted as prose instead of a structured ask_user_questions call.
+ * Without this, auto-mode treats the menu as informational and loops on its
+ * own turn until tokens are exhausted (#454).
+ */
+export function hasPlainTextNextStepsMenu(lines: string[]): boolean {
+  const nextStepsIndex = lines.findIndex((line) => /^next steps\s*:?$/i.test(line));
+  if (nextStepsIndex < 0) return false;
+  const menuLines = lines.slice(nextStepsIndex + 1);
+  const numberedOptions = menuLines.filter((line) => /^\d+[.)]\s+\S/.test(line));
+  return numberedOptions.length >= 2 && numberedOptions.some((line) => /\bother\b/i.test(line));
+}
+
 // ── Message text extraction (moved from user-input-boundary) ────────────────
 
 function extractMessageText(msg: unknown, includeThinking: boolean): string {
@@ -347,6 +361,7 @@ export function isAwaitingUserInput(messages: unknown[] | undefined): boolean {
   if (!text) return false;
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   if (lines.some((line) => line.endsWith("?"))) return true;
+  if (hasPlainTextNextStepsMenu(lines)) return true;
   return hasApprovalQuestion(text);
 }
 
