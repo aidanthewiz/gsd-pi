@@ -1223,6 +1223,47 @@ test("decideOrchestratorDispatch forwards constructor session when advance input
   }
 });
 
+test("decideOrchestratorDispatch evaluates deep pre-planning rules without an active milestone", async (t) => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-orchestrator-no-active-"));
+  t.after(() => {
+    resetRegistry();
+    rmSync(base, { recursive: true, force: true });
+  });
+  resetRegistry();
+  mkdirSync(join(base, ".gsd"), { recursive: true });
+  writeFileSync(
+    join(base, ".gsd", "PREFERENCES.md"),
+    [
+      "---",
+      "planning_depth: deep",
+      "workflow_prefs_captured: true",
+      "---",
+      "",
+    ].join("\n"),
+  );
+
+  const stateSnapshot: GSDState = {
+    ...makeState(),
+    activeMilestone: null,
+    phase: "pre-planning",
+    nextAction: "All remaining milestones are parked (M027). Run /gsd unpark M027 or create a new milestone.",
+    registry: [{ id: "M027", title: "Parked", status: "parked" }],
+  };
+  const ctx = { model: {}, modelRegistry: { getAll: () => [] } } as never;
+  const pi = { getActiveTools: () => [] } as never;
+  const session = {
+    basePath: base,
+    originalBasePath: base,
+    currentMilestoneId: "M027",
+  } as never;
+
+  const result = await decideOrchestratorDispatch(ctx, pi, base, session, { stateSnapshot });
+
+  assert.ok(result && "unitType" in result, `expected project-level dispatch, got ${JSON.stringify(result)}`);
+  assert.equal(result.unitType, "discuss-project");
+  assert.equal(result.unitId, "PROJECT");
+});
+
 test("decideOrchestratorDispatch adopts next active milestone after the session milestone is closed", async (t) => {
   const base = mkdtempSync(join(tmpdir(), "gsd-orchestrator-milestone-adopt-"));
   t.after(() => rmSync(base, { recursive: true, force: true }));

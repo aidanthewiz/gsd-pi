@@ -22,7 +22,7 @@ type BlockedAdvanceResult = Extract<AutoAdvanceResult, { kind: "blocked" }>;
 import { debugCount, debugLog, debugTime } from "../debug-logger.js";
 import { reconcileBeforeDispatch } from "../state-reconciliation.js";
 import { isLegalEdge, IllegalPhaseTransitionError } from "../state-transition-matrix.js";
-import { resolveDispatch } from "../auto-dispatch.js";
+import { hasPendingDeepStage, resolveDispatch } from "../auto-dispatch.js";
 import { classifyFailure } from "../recovery-classification.js";
 import { verifyExpectedArtifact, refreshRecoveryDbForArtifact } from "../auto-recovery.js";
 import { invalidateAllCaches } from "../cache.js";
@@ -193,14 +193,25 @@ export async function decideOrchestratorDispatch(
 ): Promise<DispatchDecision> {
   const state = input.stateSnapshot;
   const active = state.activeMilestone;
-  if (!active) return null;
-
   const activeSession = input.session ?? session;
   const activeDispatchBasePath = activeSession?.basePath || dispatchBasePath;
-  if (activeSession && shouldAdoptActiveMilestone(state, activeSession, activeDispatchBasePath)) {
+  const prefs = loadEffectiveGSDPreferences(activeDispatchBasePath)?.preferences;
+  if (!active) {
+    if (state.phase !== "pre-planning") return null;
+    if (!hasPendingDeepStage(prefs, activeDispatchBasePath)) {
+      return {
+        kind: "blocked",
+        reason: state.nextAction || "No active milestone. Run /gsd unpark <id> or create a new milestone.",
+        action: "stop",
+      };
+    }
+  }
+
+  if (active && activeSession && shouldAdoptActiveMilestone(state, activeSession, activeDispatchBasePath)) {
     activeSession.currentMilestoneId = active.id;
   }
-  const prefs = loadEffectiveGSDPreferences(activeDispatchBasePath)?.preferences;
+  const dispatchMid = active?.id ?? activeSession?.currentMilestoneId ?? "";
+  const dispatchMidTitle = active?.title ?? "";
 
   // Derive session-derived dispatch inputs the same way phases.ts:runDispatch does
   // (#5789). Prefer caller-supplied values when present so test harnesses and
@@ -255,8 +266,8 @@ export async function decideOrchestratorDispatch(
 
   const action = await resolveDispatch({
     basePath: activeDispatchBasePath,
-    mid: active.id,
-    midTitle: active.title,
+    mid: dispatchMid,
+    midTitle: dispatchMidTitle,
     state,
     prefs,
     session: activeSession,
@@ -300,8 +311,8 @@ export async function decideOrchestratorDispatch(
       prompt: action.prompt,
       pauseAfterUatDispatch: action.pauseAfterDispatch ?? false,
       state,
-      mid: active.id,
-      midTitle: active.title,
+      mid: dispatchMid,
+      midTitle: dispatchMidTitle,
     };
     session.pendingOrchestrationDispatch = pending;
   }
