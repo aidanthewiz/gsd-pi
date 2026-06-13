@@ -225,6 +225,49 @@ test("parseRoadmapSlices: demo markdown table does not switch checkbox roadmap t
   assert.deepEqual(slices[1]?.depends, ["S01"]);
 });
 
+test("parseRoadmapSlices: table preceded by intro prose still parsed as table (#722)", () => {
+  const tableWithIntro = [
+    "# M005: Intro Before Table",
+    "",
+    "## Slices",
+    "",
+    "This milestone is broken into the following slices:",
+    "",
+    "| Slice | Title | Risk | Status |",
+    "| --- | --- | --- | --- |",
+    "| S01 | Foundation | Low | [x] Done |",
+    "| S02 | Core | High | [ ] Pending |",
+    "",
+  ].join("\n");
+
+  const slices = parseRoadmapSlices(tableWithIntro);
+  assert.equal(slices.length, 2);
+  assert.equal(slices[0]?.id, "S01");
+  assert.equal(slices[0]?.done, true);
+  assert.equal(slices[1]?.id, "S02");
+  assert.equal(slices[1]?.done, false);
+});
+
+test("parseRoadmapSlices: table without markdown separator row still parsed as table (#722)", () => {
+  const tableWithoutSeparator = [
+    "# M006: No Separator",
+    "",
+    "## Slices",
+    "",
+    "| Slice | Title | Risk | Status |",
+    "| S01 | Foundation | Low | [x] Done |",
+    "| S02 | Core | High | [ ] Pending |",
+    "",
+  ].join("\n");
+
+  const slices = parseRoadmapSlices(tableWithoutSeparator);
+  assert.equal(slices.length, 2);
+  assert.equal(slices[0]?.id, "S01");
+  assert.equal(slices[0]?.done, true);
+  assert.equal(slices[1]?.id, "S02");
+  assert.equal(slices[1]?.done, false);
+});
+
 // --- Prose slice header completion marker tests (#1803) ---
 
 test("parseRoadmapSlices: prose headers with ✓ marker detected as done", () => {
