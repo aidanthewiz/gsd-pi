@@ -9,7 +9,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { buildGsdHomeModel, showGsdHome } from "../gsd-command-home.ts";
-import { detectIdleMilestoneResidueHint } from "../closeout-wizard.ts";
+import { buildIdleMenuSummary, detectIdleMilestoneResidueHint } from "../closeout-wizard.ts";
+import { closeDatabase, insertMilestone, openDatabase } from "../gsd-db.ts";
 import type { GSDState } from "../types.ts";
 
 function baseState(overrides: Partial<GSDState> = {}): GSDState {
@@ -154,6 +155,87 @@ test("detectIdleMilestoneResidueHint reports missing workflow database in a git 
   } finally {
     rmSync(base, { recursive: true, force: true });
   }
+});
+
+test("detectIdleMilestoneResidueHint matches unique-format milestone ids (M###-abc123)", () => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-home-residue-unique-"));
+  try {
+    execFileSync("git", ["init", "-b", "main"], { cwd: base, stdio: "ignore" });
+    mkdirSync(join(base, ".gsd-worktrees", "M042-abc123"), { recursive: true });
+    mkdirSync(join(base, ".gsd"), { recursive: true });
+
+    openDatabase(join(base, ".gsd", "gsd.db"));
+    try {
+      // Closed milestone with lingering worktree dir — classic residue.
+      insertMilestone({ id: "M042-abc123", title: "Closed Unique", status: "complete" });
+      const hint = detectIdleMilestoneResidueHint(base);
+      assert.ok(hint, "unique-format closed milestone with worktree should be detected");
+      assert.deepEqual(hint!.milestoneIds, ["M042-abc123"]);
+      assert.match(hint!.message, /M042-abc123/);
+    } finally {
+      closeDatabase();
+    }
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("detectIdleMilestoneResidueHint ignores in-flight milestones with worktree artifacts", () => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-home-residue-active-"));
+  try {
+    execFileSync("git", ["init", "-b", "main"], { cwd: base, stdio: "ignore" });
+    mkdirSync(join(base, ".gsd-worktrees", "M001"), { recursive: true });
+    mkdirSync(join(base, ".gsd-worktrees", "M002-abc123"), { recursive: true });
+    mkdirSync(join(base, ".gsd"), { recursive: true });
+
+    openDatabase(join(base, ".gsd", "gsd.db"));
+    try {
+      // Active and pending milestones must not be flagged as stranded residue.
+      insertMilestone({ id: "M001", title: "Active milestone", status: "active" });
+      insertMilestone({ id: "M002-abc123", title: "Pending milestone", status: "pending" });
+      const hint = detectIdleMilestoneResidueHint(base);
+      assert.equal(hint, null, "active/pending milestone worktrees must not be classified as residue");
+    } finally {
+      closeDatabase();
+    }
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("buildIdleMenuSummary surfaces idle residue hint even when phase is complete", () => {
+  const summary = buildIdleMenuSummary(
+    {
+      activeMilestone: null,
+      activeSlice: null,
+      activeTask: null,
+      phase: "complete",
+      recentDecisions: [],
+      blockers: [],
+      nextAction: "All milestones complete.",
+      lastCompletedMilestone: { id: "M001", title: "Menu Cleanup" },
+      registry: [{ id: "M001", title: "Menu Cleanup", status: "complete" }],
+      requirements: { active: 0, validated: 0, deferred: 0, outOfScope: 0, blocked: 0, total: 0 },
+      progress: {
+        milestones: { done: 1, total: 1 },
+        slices: { done: 0, total: 0 },
+        tasks: { done: 0, total: 0 },
+      },
+    },
+    {
+      strandedQuick: null,
+      unmergedMilestones: [],
+      idleResidueHint: {
+        milestoneIds: ["M008"],
+        message:
+          "Stranded milestone git residue detected (M008: worktree dir and/or milestone/* branch). " +
+          "Run /gsd dispatch complete-milestone M008 or /gsd status to recover closeout before starting new work.",
+      },
+    },
+  );
+
+  assert.match(summary[0] ?? "", /Stranded milestone git residue/);
+  assert.doesNotMatch(summary.join("\n"), /All milestones complete/);
 });
 
 test("showGsdHome renders the five-slot home text without an interactive TUI", async () => {

@@ -10,8 +10,12 @@ import type { NextAction } from "../shared/next-action-ui.js";
 import type { GSDState } from "./types.js";
 import { setAutoOutcomeWidget } from "./auto-dashboard.js";
 import { invalidateAllCaches } from "./cache.js";
+import { isDbAvailable } from "./db/engine.js";
+import { getMilestone } from "./db/queries.js";
+import { MILESTONE_ID_RE } from "./milestone-ids.js";
 import { mergeCompletedMilestone } from "./parallel-merge.js";
 import { cleanupQuickBranch, detectStrandedQuickBranch, type StrandedQuickBranch } from "./quick.js";
+import { isClosedStatus } from "./status-guards.js";
 import {
   findUnmergedCompletedMilestones,
   type UnmergedMilestoneBlocker,
@@ -40,14 +44,12 @@ const MILESTONE_MERGE_CLOSEOUT_COMMANDS = [
   "/gsd start for new work",
 ];
 
-const MILESTONE_ID_DIR_RE = /^M\d+$/;
-
 function listMilestoneWorktreeIds(basePath: string): string[] {
   const ids = new Set<string>();
   for (const wtDir of allWorktreesDirs(basePath)) {
     if (!existsSync(wtDir)) continue;
     for (const entry of readdirSync(wtDir)) {
-      if (!MILESTONE_ID_DIR_RE.test(entry)) continue;
+      if (!MILESTONE_ID_RE.test(entry)) continue;
       try {
         if (statSync(join(wtDir, entry)).isDirectory()) ids.add(entry);
       } catch {
@@ -62,11 +64,26 @@ function listMilestoneBranchIds(basePath: string): string[] {
   try {
     return nativeBranchList(basePath, "milestone/*")
       .map((branch) => branch.replace(/^milestone\//, ""))
-      .filter((id) => MILESTONE_ID_DIR_RE.test(id))
+      .filter((id) => MILESTONE_ID_RE.test(id))
       .sort();
   } catch {
     return [];
   }
+}
+
+/**
+ * A milestone ID is "stranded residue" only when its worktree/branch artifacts
+ * exist for a milestone the DB does not consider currently in flight — i.e. the
+ * row is closed (complete/done/skipped/closed) or absent. Active, pending,
+ * blocked, parked, queued, and deferred rows describe normal in-flight or
+ * intentionally-preserved state, never residue. Returning `false` skips the ID;
+ * returning `true` keeps it in the hint.
+ */
+function isStrandedMilestoneId(milestoneId: string): boolean {
+  if (!isDbAvailable()) return true;
+  const row = getMilestone(milestoneId);
+  if (!row) return true;
+  return isClosedStatus(row.status);
 }
 
 /** Surface stranded milestone git residue when closeout guards did not classify it. */
@@ -86,7 +103,8 @@ export function detectIdleMilestoneResidueHint(basePath: string): IdleMilestoneR
 
   const worktreeIds = listMilestoneWorktreeIds(basePath);
   const branchIds = listMilestoneBranchIds(basePath);
-  const milestoneIds = [...new Set([...worktreeIds, ...branchIds])].sort();
+  const candidateIds = [...new Set([...worktreeIds, ...branchIds])].sort();
+  const milestoneIds = candidateIds.filter(isStrandedMilestoneId);
   if (milestoneIds.length === 0) return null;
 
   const listed = milestoneIds.join(", ");
@@ -163,6 +181,14 @@ export function buildIdleMenuSummary(state: GSDState, closeout: CloseoutContext)
     ];
   }
 
+  // Surface idle residue before the completion summary so smart entry shows
+  // the same recovery text /gsd home would: a closed/unknown milestone with
+  // lingering worktree/branch artifacts must not be hidden behind the
+  // "all milestones complete" message.
+  if (closeout.idleResidueHint) {
+    return [closeout.idleResidueHint.message];
+  }
+
   if (state.phase === "complete") {
     const last = state.lastCompletedMilestone;
     return appendRequirementsBacklogToSummary(state, [
@@ -170,10 +196,6 @@ export function buildIdleMenuSummary(state: GSDState, closeout: CloseoutContext)
         ? `All milestones complete after ${last.id}: ${last.title}.`
         : "All milestones complete.",
     ]);
-  }
-
-  if (closeout.idleResidueHint) {
-    return [closeout.idleResidueHint.message];
   }
 
   return [state.nextAction || "No active milestone."];
