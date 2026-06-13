@@ -38,6 +38,17 @@ describe("resolveGsdBrowserMcpLaunchConfig identity flags", () => {
     assert.equal(args[args.indexOf("--identity-key") + 1], "custom-key");
   });
 
+  it("splits GSD_BROWSER_MCP_COMMAND command lines before spawning", () => {
+    const commandLine = '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\Test User\\AppData\\Roaming\\npm\\node_modules\\@opengsd\\gsd-browser\\bin\\gsd-browser"';
+    const { command, args } = resolveGsdBrowserMcpLaunchConfig("C:\\Users\\Test User\\project", {
+      GSD_BROWSER_MCP_COMMAND: commandLine,
+    });
+
+    assert.equal(command, "C:\\Program Files\\nodejs\\node.exe");
+    assert.equal(args[0], "C:\\Users\\Test User\\AppData\\Roaming\\npm\\node_modules\\@opengsd\\gsd-browser\\bin\\gsd-browser");
+    assert.equal(args[1], "mcp");
+  });
+
   it("uses a path-safe identity-project identifier", () => {
     const { args } = resolveGsdBrowserMcpLaunchConfig("/tmp/example/project", {});
     const projectId = args[args.indexOf("--identity-project") + 1];

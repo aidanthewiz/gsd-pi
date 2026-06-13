@@ -55,6 +55,24 @@ function parseGsdBrowserVersion(output: string): string | null {
   return output.match(/\b(\d+\.\d+\.\d+)\b/)?.[1] ?? null;
 }
 
+function splitCommandLine(commandLine: string): string[] {
+  const parts = commandLine.match(/(?:"[^"]*"|'[^']*'|[^\s"']+)/g) ?? [];
+  return parts.map((part) => {
+    const quote = part[0];
+    if ((quote === '"' || quote === "'") && part.endsWith(quote)) {
+      return part.slice(1, -1);
+    }
+    return part;
+  });
+}
+
+function buildPathGsdBrowserVersionInvocation(platform: NodeJS.Platform): { command: string; args: string[] } {
+  if (platform === "win32") {
+    return { command: "cmd", args: ["/d", "/s", "/c", "gsd-browser", "--version"] };
+  }
+  return { command: "gsd-browser", args: ["--version"] };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -86,7 +104,8 @@ function resolvePathGsdBrowserVersion(env: NodeJS.ProcessEnv): string | null {
   if (cachedPathProbeVersion !== undefined) return cachedPathProbeVersion;
 
   try {
-    cachedPathProbeVersion = parseGsdBrowserVersion(execFileSync("gsd-browser", ["--version"], {
+    const invocation = buildPathGsdBrowserVersionInvocation(process.platform);
+    cachedPathProbeVersion = parseGsdBrowserVersion(execFileSync(invocation.command, invocation.args, {
       encoding: "utf-8",
       env,
       stdio: ["ignore", "pipe", "ignore"],
@@ -216,7 +235,8 @@ export function resolveGsdBrowserMcpLaunchConfig(
   const serverName = env.GSD_BROWSER_MCP_NAME?.trim() || GSD_BROWSER_MCP_SERVER_NAME;
   const explicitArgs = parseJsonEnv<unknown>(env, "GSD_BROWSER_MCP_ARGS");
   const explicitEnv = parseJsonEnv<Record<string, string>>(env, "GSD_BROWSER_MCP_ENV");
-  const explicitCommand = env.GSD_BROWSER_MCP_COMMAND?.trim();
+  const explicitCommandLine = env.GSD_BROWSER_MCP_COMMAND?.trim();
+  const [explicitCommand, ...explicitCommandArgs] = explicitCommandLine ? splitCommandLine(explicitCommandLine) : [];
   const explicitCliPath = resolveExplicitGsdBrowserCliPath(env);
   const preferPathCli = !explicitCommand && !explicitCliPath && shouldPreferPathGsdBrowser(env);
   const bundledCliPath = !explicitCommand && !explicitCliPath && !preferPathCli
@@ -241,6 +261,7 @@ export function resolveGsdBrowserMcpLaunchConfig(
   const args = Array.isArray(explicitArgs) && explicitArgs.length > 0
     ? explicitArgs.map(String)
     : [
+        ...explicitCommandArgs,
         ...(bundledCliPath ? [bundledCliPath] : []),
         "mcp",
         "--session",
