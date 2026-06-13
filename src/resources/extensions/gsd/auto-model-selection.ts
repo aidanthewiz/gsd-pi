@@ -18,7 +18,7 @@ import { getSessionModelOverride } from "./session-model-override.js";
 import { logWarning } from "./workflow-logger.js";
 import { resolveUokFlags } from "./uok/flags.js";
 import { applyModelPolicyFilter } from "./uok/model-policy.js";
-import { isModelBlocked } from "./blocked-models.js";
+import { isModelBlocked, isModelTemporarilyUnavailable } from "./blocked-models.js";
 import { getRequiredWorkflowToolsForAutoUnit, isWorkflowMcpSurfaceTool } from "./workflow-mcp.js";
 
 /**
@@ -270,6 +270,15 @@ function buildModelPolicyBlockReasons(
     modelId: modelsToTry.join(", ") || "(none)",
     reason: `configured model(s) did not resolve against policy-eligible registry [${eligibleSummary}]`,
   }];
+}
+
+function isModelUnavailable(
+  basePath: string,
+  provider: string | undefined,
+  id: string | undefined,
+): boolean {
+  return isModelBlocked(basePath, provider, id) ||
+    isModelTemporarilyUnavailable(basePath, provider, id);
 }
 
 function restoreToolBaseline(pi: ExtensionAPI): void {
@@ -817,9 +826,9 @@ export async function selectAndApplyModel(
       // (issue #4513).  The block is persisted in .gsd/runtime/blocked-models.json
       // so it survives /gsd auto restarts — without this, the same dead model
       // gets reselected after every restart.
-      if (isModelBlocked(basePath, model.provider, model.id)) {
+      if (isModelUnavailable(basePath, model.provider, model.id)) {
         ctx.ui.notify(
-          `Skipping blocked model ${model.provider}/${model.id} (provider rejected it for this account).`,
+          `Skipping unavailable model ${model.provider}/${model.id}.`,
           "warning",
         );
         continue;
@@ -896,7 +905,7 @@ export async function selectAndApplyModel(
       for (const model of buildPolicyEligibleFallbackOrder(ctx, routingEligibleModels, autoModeStartModel)) {
         const key = `${model.provider.toLowerCase()}/${model.id.toLowerCase()}`;
         if (!policyAllowedModelKeys.has(key)) continue;
-        if (isModelBlocked(basePath, model.provider, model.id)) continue;
+        if (isModelUnavailable(basePath, model.provider, model.id)) continue;
         const ok = await pi.setModel(model, { persist: false });
         if (!ok) continue;
         appliedModel = model;
@@ -926,10 +935,10 @@ export async function selectAndApplyModel(
       autoModeStartModel,
       effectiveSessionModelOverride,
     );
-    const startBlocked = isModelBlocked(basePath, autoModeStartModel.provider, autoModeStartModel.id);
+    const startBlocked = isModelUnavailable(basePath, autoModeStartModel.provider, autoModeStartModel.id);
     if (startBlocked) {
       ctx.ui.notify(
-        `Auto-mode start model ${autoModeStartModel.provider}/${autoModeStartModel.id} is blocked for this account. Using current session model instead.`,
+        `Auto-mode start model ${autoModeStartModel.provider}/${autoModeStartModel.id} is unavailable. Using current session model instead.`,
         "warning",
       );
     } else {
@@ -940,7 +949,7 @@ export async function selectAndApplyModel(
         const ok = await pi.setModel(startModel, { persist: false });
         if (!ok) {
           const byId = availableModels.find(
-            m => m.id === autoModeStartModel.id && !isModelBlocked(basePath, m.provider, m.id),
+            m => m.id === autoModeStartModel.id && !isModelUnavailable(basePath, m.provider, m.id),
           );
           if (byId) {
             const fallbackOk = await pi.setModel(byId, { persist: false });

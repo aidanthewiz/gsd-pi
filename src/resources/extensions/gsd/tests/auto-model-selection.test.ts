@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 import { ModelPolicyDispatchBlockedError, resolvePreferredModelConfig, resolveModelId, selectAndApplyModel, floorThinkingLevelForUnit } from "../auto-model-selection.js";
+import { blockModelUntil, clearTemporaryModelBlocksForTest } from "../blocked-models.ts";
 
 function makeTempDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -215,6 +216,74 @@ test("selectAndApplyModel honors explicit phase models without downgrading (#361
     assert.equal(result.appliedModel?.provider, "anthropic");
     assert.equal(result.appliedModel?.id, "claude-opus-4-6");
   } finally {
+    process.chdir(originalCwd);
+    if (originalGsdHome === undefined) delete process.env.GSD_HOME;
+    else process.env.GSD_HOME = originalGsdHome;
+    rmSync(tempProject, { recursive: true, force: true });
+    rmSync(tempGsdHome, { recursive: true, force: true });
+  }
+});
+
+test("selectAndApplyModel skips a rate-limited primary until its reset time", async () => {
+  const originalCwd = process.cwd();
+  const originalGsdHome = process.env.GSD_HOME;
+  const tempProject = makeTempDir("gsd-rate-limit-fallback-project-");
+  const tempGsdHome = makeTempDir("gsd-rate-limit-fallback-home-");
+  const setModelCalls: string[] = [];
+
+  try {
+    clearTemporaryModelBlocksForTest();
+    mkdirSync(join(tempProject, ".gsd"), { recursive: true });
+    writeFileSync(
+      join(tempProject, ".gsd", "PREFERENCES.md"),
+      [
+        "---",
+        "models:",
+        "  execution:",
+        "    model: gpt-5.5",
+        "    provider: openai-codex",
+        "    fallbacks:",
+        "      - anthropic/claude-sonnet-4-6",
+        "---",
+      ].join("\n"),
+      "utf-8",
+    );
+    process.env.GSD_HOME = tempGsdHome;
+    process.chdir(tempProject);
+
+    const availableModels = [
+      { id: "gpt-5.5", provider: "openai-codex", api: "responses" },
+      { id: "claude-sonnet-4-6", provider: "anthropic", api: "anthropic-messages" },
+    ];
+    const ctx = {
+      modelRegistry: { getAvailable: () => availableModels },
+      sessionManager: { getSessionId: () => "test-session" },
+      ui: { notify: () => {} },
+      model: { provider: "openai-codex", id: "gpt-5.5", api: "responses" },
+    } as any;
+    const pi = {
+      setModel: async (model: { provider: string; id: string }) => {
+        setModelCalls.push(`${model.provider}/${model.id}`);
+        return true;
+      },
+      emitBeforeModelSelect: async () => undefined,
+      getActiveTools: () => [],
+      emitAdjustToolSet: async () => undefined,
+      setActiveTools: () => {},
+    } as any;
+
+    blockModelUntil(tempProject, "openai-codex", "gpt-5.5", Date.now() + 60_000, "session limit");
+    await selectAndApplyModel(ctx, pi, "execute-task", "M001/S01/T01", tempProject, undefined, false, { provider: "openai-codex", id: "gpt-5.5" }, undefined, true);
+
+    blockModelUntil(tempProject, "openai-codex", "gpt-5.5", Date.now() - 1, "expired");
+    await selectAndApplyModel(ctx, pi, "execute-task", "M001/S01/T02", tempProject, undefined, false, { provider: "openai-codex", id: "gpt-5.5" }, undefined, true);
+
+    assert.deepEqual(setModelCalls, [
+      "anthropic/claude-sonnet-4-6",
+      "openai-codex/gpt-5.5",
+    ]);
+  } finally {
+    clearTemporaryModelBlocksForTest();
     process.chdir(originalCwd);
     if (originalGsdHome === undefined) delete process.env.GSD_HOME;
     else process.env.GSD_HOME = originalGsdHome;
