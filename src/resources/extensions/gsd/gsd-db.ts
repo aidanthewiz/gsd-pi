@@ -246,9 +246,9 @@ export function insertMilestone(m: {
   status?: string;
   depends_on?: string[];
   planning?: Partial<MilestonePlanningRecord>;
-}): void {
+}): boolean {
   if (!getDbOrNull()!) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
-  getDbOrNull()!.prepare(
+  const result = getDbOrNull()!.prepare(
     `INSERT OR IGNORE INTO milestones (
       id, title, status, depends_on, created_at,
       vision, success_criteria, key_risks, proof_strategy,
@@ -279,7 +279,8 @@ export function insertMilestone(m: {
     ":definition_of_done": JSON.stringify(m.planning?.definitionOfDone ?? []),
     ":requirement_coverage": m.planning?.requirementCoverage ?? "",
     ":boundary_map_markdown": m.planning?.boundaryMapMarkdown ?? "",
-  });
+  }) as { changes?: number };
+  return (result.changes ?? 0) > 0;
 }
 
 export function upsertMilestonePlanning(milestoneId: string, planning: Partial<MilestonePlanningRecord> & { title?: string; status?: string; depends_on?: string[] }): void {

@@ -19,9 +19,10 @@ import {
 } from "../gsd-db.js";
 import { GATE_REGISTRY } from "../gate-registry.js";
 import { generateRequirementsMd, saveArtifactToDb } from "../db-writer.js";
-import { clearPathCache, relSliceFile, resolveGsdPathContract, resolveMilestoneFile, resolveSliceFile } from "../paths.js";
+import { clearPathCache, normalizeRealPath, relSliceFile, resolveGsdPathContract, resolveMilestoneFile, resolveSliceFile } from "../paths.js";
 import { saveFile, clearParseCache } from "../files.js";
 import { unlinkSync } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import type { CompleteMilestoneParams } from "./complete-milestone.js";
 import { handleCompleteMilestone } from "./complete-milestone.js";
@@ -48,13 +49,21 @@ import { logError, logWarning } from "../workflow-logger.js";
 import { invalidateStateCache } from "../state.js";
 import { loadEffectiveGSDPreferences } from "../preferences.js";
 import { parseProject } from "../schemas/parsers.js";
-import { getAutoRuntimeSnapshot } from "../auto-runtime-state.js";
+import { autoSession, getAutoRuntimeSnapshot, isAutoActive } from "../auto-runtime-state.js";
 import { renderPlanFromDb } from "../markdown-renderer.js";
 import {
   prepareUatRun,
   saveUatAttemptArtifact,
   type UatResultSaveParams,
 } from "../uat-run.js";
+import { registerAutoWorker, markWorkerStopping, getAutoWorker } from "../db/auto-workers.js";
+import {
+  claimMilestoneLease,
+  releaseMilestoneLease,
+  getMilestoneLease,
+  refreshMilestoneLease,
+  milestoneLeaseTtlSeconds,
+} from "../db/milestone-leases.js";
 export type {
   UatCheckResultInput,
   UatEvidenceRef,
@@ -101,6 +110,24 @@ function blockIfWrongAutoUnit(requiredUnitType: string, operation: string): Tool
   return {
     content: [{ type: "text", text: error }],
     details: { operation, error },
+    isError: true,
+  };
+}
+
+function milestoneLeaseConflictResult(
+  milestoneId: string,
+  byWorker: string,
+  expiresAt: string,
+): ToolExecutionResult {
+  return {
+    content: [{ type: "text", text: `Milestone ${milestoneId} is currently leased by ${byWorker}. Retry after ${expiresAt}.` }],
+    details: {
+      operation: "plan_milestone",
+      error: "milestone_lease_conflict",
+      milestoneId,
+      byWorker,
+      expiresAt,
+    },
     isError: true,
   };
 }
@@ -1244,7 +1271,48 @@ export async function executePlanMilestone(
     isError: true,
       };
   }
+  let workerId: string | null = null;
+  let acquiredToken: number | null = null;
+  let leaseRefreshTimer: ReturnType<typeof setInterval> | undefined;
   try {
+    // Re-read at the gate so a peer-created milestone is not treated as fresh.
+    const milestoneExists = getMilestone(params.milestoneId) !== null;
+    if (milestoneExists) {
+      const heldLease = getMilestoneLease(params.milestoneId);
+      if (heldLease?.status === "held" && Date.parse(heldLease.expires_at) > Date.now()) {
+        const holder = getAutoWorker(heldLease.worker_id);
+        // Let the one-shot claim path recover stale same-process worker rows.
+        const projectRoot = normalizeRealPath(basePath);
+        const isOurAutoLease = isAutoActive() && heldLease.worker_id === autoSession.workerId;
+        const holderIsOneShotReentrantPeer = !isAutoActive()
+          && !!holder
+          && holder.host === hostname()
+          && holder.pid === process.pid
+          && holder.project_root_realpath === projectRoot;
+        if (holder?.status === "active" && !isOurAutoLease && !holderIsOneShotReentrantPeer) {
+          return milestoneLeaseConflictResult(params.milestoneId, heldLease.worker_id, heldLease.expires_at);
+        }
+      }
+    }
+
+    // Fresh creation cannot claim a lease because the FK row does not exist.
+    // In-process auto already owns its lease; re-claiming would bump its token.
+    if (!isAutoActive() && milestoneExists) {
+      workerId = registerAutoWorker({ projectRootRealpath: normalizeRealPath(basePath) });
+      const lease = claimMilestoneLease(workerId, params.milestoneId);
+      if (!lease.ok) {
+        return milestoneLeaseConflictResult(params.milestoneId, lease.byWorker, lease.expiresAt);
+      }
+      acquiredToken = lease.token;
+
+      const leaseRefreshMs = (milestoneLeaseTtlSeconds() / 2) * 1000;
+      leaseRefreshTimer = setInterval(() => {
+        if (acquiredToken !== null && workerId !== null) {
+          refreshMilestoneLease(workerId, params.milestoneId, acquiredToken);
+        }
+      }, leaseRefreshMs);
+    }
+
     const result = await handlePlanMilestone(params, basePath);
     if ("error" in result) {
       return {
@@ -1269,6 +1337,17 @@ export async function executePlanMilestone(
       details: { operation: "plan_milestone", error: msg },
     isError: true,
       };
+  }
+  finally {
+    if (leaseRefreshTimer !== undefined) {
+      clearInterval(leaseRefreshTimer);
+    }
+    if (workerId !== null && acquiredToken !== null) {
+      releaseMilestoneLease(workerId, params.milestoneId, acquiredToken);
+    }
+    if (workerId !== null) {
+      markWorkerStopping(workerId);
+    }
   }
 }
 

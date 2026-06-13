@@ -15,8 +15,11 @@ import {
   upsertRequirement,
   getAllMilestones,
 } from "../gsd-db.ts";
+import { registerAutoWorker } from "../db/auto-workers.ts";
+import { claimMilestoneLease, getMilestoneLease } from "../db/milestone-leases.ts";
 import { deriveState, invalidateStateCache } from "../state.ts";
 import { autoSession } from "../auto-runtime-state.ts";
+import { normalizeRealPath } from "../paths.ts";
 import { markApprovalGateVerified, markDepthVerified, clearDiscussionFlowState, loadWriteGateSnapshot, setPendingGate } from "../bootstrap/write-gate.ts";
 import {
   executeCompleteMilestone,
@@ -92,6 +95,28 @@ function seedMilestone(milestoneId: string, title: string, status = "active"): v
   db.prepare(
     "INSERT OR REPLACE INTO milestones (id, title, status, created_at) VALUES (?, ?, ?, ?)",
   ).run(milestoneId, title, status, new Date().toISOString());
+}
+
+function validMilestonePlan(milestoneId = "M001"): Parameters<typeof executePlanMilestone>[0] {
+  return {
+    milestoneId,
+    title: "Workflow MCP planning",
+    vision: "Plan milestone over shared executors.",
+    slices: [
+      {
+        sliceId: "S01",
+        title: "Bridge planning",
+        risk: "medium",
+        depends: [],
+        demo: "Milestone plan persists through MCP.",
+        goal: "Persist roadmap state.",
+        successCriteria: "ROADMAP.md renders from DB.",
+        proofLevel: "integration",
+        integrationClosure: "Prompts and MCP call the same handler.",
+        observabilityImpact: "Executor tests cover output paths.",
+      },
+    ],
+  };
 }
 
 function seedSlice(milestoneId: string, sliceId: string, status: string): void {
@@ -461,25 +486,7 @@ test("executePlanMilestone writes roadmap state and rendered roadmap path", asyn
   try {
     openTestDb(base);
 
-    const result = await inProjectDir(base, () => executePlanMilestone({
-      milestoneId: "M001",
-      title: "Workflow MCP planning",
-      vision: "Plan milestone over shared executors.",
-      slices: [
-        {
-          sliceId: "S01",
-          title: "Bridge planning",
-          risk: "medium",
-          depends: [],
-          demo: "Milestone plan persists through MCP.",
-          goal: "Persist roadmap state.",
-          successCriteria: "ROADMAP.md renders from DB.",
-          proofLevel: "integration",
-          integrationClosure: "Prompts and MCP call the same handler.",
-          observabilityImpact: "Executor tests cover output paths.",
-        },
-      ],
-    }, base));
+    const result = await inProjectDir(base, () => executePlanMilestone(validMilestonePlan(), base));
 
     assert.equal(result.details.operation, "plan_milestone");
     assert.equal(result.details.milestoneId, "M001");
@@ -492,29 +499,257 @@ test("executePlanMilestone writes roadmap state and rendered roadmap path", asyn
   }
 });
 
+test("executePlanMilestone refuses a same-milestone lease conflict", async () => {
+  const base = makeTmpBase();
+  try {
+    openTestDb(base);
+    seedMilestone("M001", "Existing holder");
+    const holder = registerAutoWorker({ projectRootRealpath: join(base, "other-project") });
+    const lease = claimMilestoneLease(holder, "M001");
+    assert.equal(lease.ok, true);
+
+    const result = await inProjectDir(base, () => executePlanMilestone(validMilestonePlan("M001"), base));
+
+    assert.equal(result.isError, true);
+    assert.equal(result.details.operation, "plan_milestone");
+    assert.equal(result.details.error, "milestone_lease_conflict");
+    assert.match(result.content[0].text, /Milestone M001 is currently leased/);
+  } finally {
+    closeDatabase();
+    cleanup(base);
+  }
+});
+
+test("executePlanMilestone releases its one-shot milestone lease after planning", async () => {
+  const base = makeTmpBase();
+  try {
+    openTestDb(base);
+    seedMilestone("M001", "Existing milestone");
+
+    const result = await inProjectDir(base, () => executePlanMilestone(validMilestonePlan("M001"), base));
+
+    assert.equal(result.isError, undefined);
+    const lease = getMilestoneLease("M001");
+    assert.ok(lease, "planning should participate in milestone lease coordination");
+    assert.equal(lease.status, "released");
+  } finally {
+    closeDatabase();
+    cleanup(base);
+  }
+});
+
+test("executePlanMilestone creates a fresh milestone without a one-shot lease", async () => {
+  const base = makeTmpBase();
+  try {
+    openTestDb(base);
+
+    const result = await inProjectDir(base, () => executePlanMilestone(validMilestonePlan("M042"), base));
+
+    assert.equal(result.isError, undefined);
+    assert.equal(result.details.operation, "plan_milestone");
+    assert.equal(result.details.milestoneId, "M042");
+    assert.equal(getMilestoneLease("M042"), null,
+      "fresh milestone creation must pass through without creating a lease row");
+  } finally {
+    closeDatabase();
+    cleanup(base);
+  }
+});
+
+test("executePlanMilestone does not create a placeholder when fresh planning validation fails", async () => {
+  const base = makeTmpBase();
+  try {
+    openTestDb(base);
+
+    // handlePlanMilestone rejects empty slice arrays during validation. Fresh
+    // milestone creation must pass through without pre-inserting a leaseable
+    // placeholder row.
+    const invalid = { ...validMilestonePlan("M042"), slices: [] };
+    const result = await inProjectDir(base, () => executePlanMilestone(invalid, base));
+
+    assert.equal(result.isError, true);
+    assert.equal(result.details.operation, "plan_milestone");
+    const milestones = getAllMilestones();
+    assert.equal(milestones.find(m => m.id === "M042"), undefined,
+      "failed fresh planning must not leave a milestone row behind");
+    assert.equal(getMilestoneLease("M042"), null,
+      "failed fresh planning must not create a lease row");
+  } finally {
+    closeDatabase();
+    cleanup(base);
+  }
+});
+
+test("executePlanMilestone does not delete a peer worker's milestone row on lease conflict", async () => {
+  const base = makeTmpBase();
+  try {
+    openTestDb(base);
+
+    // Simulate a peer worker (different project_root) that has already
+    // created the milestone row and taken its lease. The one-shot executor
+    // must observe the active lease and refuse — without removing the peer's
+    // milestone row or lease. The pre-rollback bug was that
+    // INSERT OR IGNORE's silent no-op was treated as proof of authorship and
+    // the cleanup path then deleted the peer's row.
+    const peer = registerAutoWorker({ projectRootRealpath: join(base, "peer-project") });
+    seedMilestone("M050", "Peer-owned milestone");
+    const peerLease = claimMilestoneLease(peer, "M050");
+    assert.equal(peerLease.ok, true);
+    const peerLeaseToken = peerLease.ok ? peerLease.token : -1;
+
+    const result = await inProjectDir(base, () => executePlanMilestone(validMilestonePlan("M050"), base));
+
+    assert.equal(result.isError, true);
+    assert.equal(result.details.error, "milestone_lease_conflict");
+    const peerMilestone = getAllMilestones().find(m => m.id === "M050");
+    assert.ok(peerMilestone, "peer milestone row must survive the one-shot conflict path");
+    assert.equal(peerMilestone?.title, "Peer-owned milestone",
+      "peer milestone row must not be clobbered or recreated");
+    const surviving = getMilestoneLease("M050");
+    assert.ok(surviving, "peer lease row must survive");
+    assert.equal(surviving.status, "held", "peer must still hold the lease");
+    assert.equal(surviving.worker_id, peer);
+    assert.equal(surviving.fencing_token, peerLeaseToken,
+      "peer's fencing token must not be incremented by the rejected one-shot");
+  } finally {
+    closeDatabase();
+    cleanup(base);
+  }
+});
+
+test("executePlanMilestone refuses when a foreign active worker holds the lease even while in-process auto is active", async () => {
+  const base = makeTmpBase();
+  autoSession.reset();
+  try {
+    openTestDb(base);
+    seedMilestone("M060", "Foreign-held milestone");
+
+    // In-process auto must still reject a lease held by another worker.
+    const foreign = registerAutoWorker({ projectRootRealpath: join(base, "foreign-project") });
+    const foreignLease = claimMilestoneLease(foreign, "M060");
+    assert.equal(foreignLease.ok, true);
+    const foreignToken = foreignLease.ok ? foreignLease.token : -1;
+
+    const ownAutoWorker = registerAutoWorker({ projectRootRealpath: normalizeRealPath(base) });
+    autoSession.active = true;
+    autoSession.workerId = ownAutoWorker;
+
+    const result = await inProjectDir(base, () => executePlanMilestone(validMilestonePlan("M060"), base));
+
+    assert.equal(result.isError, true);
+    assert.equal(result.details.error, "milestone_lease_conflict",
+      "in-process auto must NOT skip lease checks when the lease is held by a different active worker");
+    const surviving = getMilestoneLease("M060");
+    assert.ok(surviving);
+    assert.equal(surviving.status, "held");
+    assert.equal(surviving.worker_id, foreign);
+    assert.equal(surviving.fencing_token, foreignToken,
+      "foreign worker's fencing token must not be incremented by the rejected call");
+  } finally {
+    autoSession.reset();
+    closeDatabase();
+    cleanup(base);
+  }
+});
+
+test("executePlanMilestone proceeds without re-claiming when in-process auto holds the lease itself", async () => {
+  const base = makeTmpBase();
+  autoSession.reset();
+  try {
+    openTestDb(base);
+    seedMilestone("M070", "Auto-held milestone");
+
+    // In-process auto should not re-claim its own lease and bump its token.
+    const ownAutoWorker = registerAutoWorker({ projectRootRealpath: normalizeRealPath(base) });
+    const heldLease = claimMilestoneLease(ownAutoWorker, "M070");
+    assert.equal(heldLease.ok, true);
+    const heldToken = heldLease.ok ? heldLease.token : -1;
+    autoSession.active = true;
+    autoSession.workerId = ownAutoWorker;
+
+    const result = await inProjectDir(base, () => executePlanMilestone(validMilestonePlan("M070"), base));
+
+    assert.equal(result.isError, undefined, `auto's own plan-milestone call should succeed: ${result.content?.[0]?.text}`);
+    const surviving = getMilestoneLease("M070");
+    assert.ok(surviving);
+    assert.equal(surviving.status, "held", "auto's lease must still be held after the planning call");
+    assert.equal(surviving.worker_id, ownAutoWorker);
+    assert.equal(surviving.fencing_token, heldToken,
+      "auto's fencing token must not be incremented by an in-process plan call");
+  } finally {
+    autoSession.reset();
+    closeDatabase();
+    cleanup(base);
+  }
+});
+
+test("executePlanMilestone refuses a same-process holder when active auto does not own it", async () => {
+  const base = makeTmpBase();
+  autoSession.reset();
+  try {
+    openTestDb(base);
+    seedMilestone("M080", "Same-process holder");
+    const staleWorker = registerAutoWorker({ projectRootRealpath: normalizeRealPath(base) });
+    const heldLease = claimMilestoneLease(staleWorker, "M080");
+    assert.equal(heldLease.ok, true);
+    const heldToken = heldLease.ok ? heldLease.token : -1;
+
+    autoSession.active = true;
+    autoSession.workerId = registerAutoWorker({ projectRootRealpath: normalizeRealPath(base) });
+
+    const result = await inProjectDir(base, () => executePlanMilestone(validMilestonePlan("M080"), base));
+
+    assert.equal(result.isError, true);
+    assert.equal(result.details?.error, "milestone_lease_conflict");
+    const surviving = getMilestoneLease("M080");
+    assert.ok(surviving, "same-process holder lease must remain after conflict");
+    assert.equal(surviving.worker_id, staleWorker);
+    assert.equal(surviving.fencing_token, heldToken);
+    assert.equal(surviving.status, "held");
+  } finally {
+    autoSession.reset();
+    closeDatabase();
+    cleanup(base);
+  }
+});
+
+test("executePlanMilestone takes over a stale same-process lease via reentry instead of waiting for TTL", async () => {
+  const base = makeTmpBase();
+  autoSession.reset();
+  try {
+    openTestDb(base);
+    seedMilestone("M080", "Stale-locked milestone");
+
+    // One-shot planning should reach claimMilestoneLease so its same-process
+    // reentry clause can recover stale worker rows.
+    const staleWorker = registerAutoWorker({ projectRootRealpath: normalizeRealPath(base) });
+    const staleLease = claimMilestoneLease(staleWorker, "M080");
+    assert.equal(staleLease.ok, true);
+    const staleToken = staleLease.ok ? staleLease.token : -1;
+
+    const result = await inProjectDir(base, () => executePlanMilestone(validMilestonePlan("M080"), base));
+
+    assert.equal(result.isError, undefined,
+      `same-process reentry takeover must succeed, not return milestone_lease_conflict: ${result.content?.[0]?.text}`);
+    const after = getMilestoneLease("M080");
+    assert.ok(after, "lease row must remain after takeover + release");
+    assert.equal(after.status, "released", "the executor releases its own claim before returning");
+    assert.notEqual(after.worker_id, staleWorker,
+      "lease must be owned by the new worker after takeover");
+    assert.ok(after.fencing_token > staleToken,
+      `fencing token must monotonically advance on takeover (was ${staleToken}, now ${after.fencing_token})`);
+  } finally {
+    autoSession.reset();
+    closeDatabase();
+    cleanup(base);
+  }
+});
+
 test("executePlanSlice writes task planning state and rendered plan artifacts", async () => {
   const base = makeTmpBase();
   try {
     openTestDb(base);
-    await inProjectDir(base, () => executePlanMilestone({
-      milestoneId: "M001",
-      title: "Workflow MCP planning",
-      vision: "Plan milestone over shared executors.",
-      slices: [
-        {
-          sliceId: "S01",
-          title: "Bridge planning",
-          risk: "medium",
-          depends: [],
-          demo: "Milestone plan persists through MCP.",
-          goal: "Persist roadmap state.",
-          successCriteria: "ROADMAP.md renders from DB.",
-          proofLevel: "integration",
-          integrationClosure: "Prompts and MCP call the same handler.",
-          observabilityImpact: "Executor tests cover output paths.",
-        },
-      ],
-    }, base));
+    await inProjectDir(base, () => executePlanMilestone(validMilestonePlan(), base));
 
     const result = await inProjectDir(base, () => executePlanSlice({
       milestoneId: "M001",
