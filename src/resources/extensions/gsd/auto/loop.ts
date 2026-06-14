@@ -25,7 +25,7 @@ import {
   type IterationData,
 } from "./types.js";
 import { _clearCurrentResolve } from "./resolve.js";
-import { runGuards, runFinalize } from "./phases.js";
+import { runGuards, runFinalize, shouldSkipTerminalMilestoneCloseout } from "./phases.js";
 import { STUCK_WINDOW_SIZE } from "./dispatch-history.js";
 import { debugLog } from "../debug-logger.js";
 import { isInfrastructureError, isTransientCooldownError, getCooldownRetryAfterMs, COOLDOWN_FALLBACK_WAIT_MS, MAX_COOLDOWN_RETRIES } from "./infra-errors.js";
@@ -955,6 +955,23 @@ export async function autoLoop(
 
           if (orchestrationResult.kind === "stopped") {
             s.pendingOrchestrationDispatch = null;
+            const stoppedState = orchestrationResult.stateSnapshot;
+            if (stoppedState?.phase === "complete") {
+              const closeoutSkip = await shouldSkipTerminalMilestoneCloseout(
+                s,
+                stoppedState,
+                stoppedState.activeMilestone?.id,
+              );
+              if (closeoutSkip.skip) {
+                debugLog("autoLoop", {
+                  phase: "complete",
+                  reason: "milestone-already-closed",
+                  milestoneId: closeoutSkip.milestoneId,
+                });
+                finishTurn("stopped", "manual-attention", "orchestration-stopped");
+                break;
+              }
+            }
             let completionStop = resolveCompletionStopFromOutcome(
               orchestrationResult.terminalOutcome,
               orchestrationResult.stateSnapshot,

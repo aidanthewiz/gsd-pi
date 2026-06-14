@@ -21,7 +21,7 @@ import {
 } from "../auto-post-unit.js";
 import { lastAssistantText } from "../consent-question.js";
 import { resolveEffectiveUnitIsolationMode, getIsolationMode } from "../preferences.js";
-import type { Phase } from "../types.js";
+import type { GSDState, Phase } from "../types.js";
 import {
   MAX_RECOVERY_CHARS,
   BUDGET_THRESHOLDS,
@@ -839,6 +839,39 @@ async function failClosedOnFinalizeTimeout(
   return { action: "break", reason: progressKind };
 }
 
+export async function shouldSkipTerminalMilestoneCloseout(
+  s: AutoSession,
+  state: Pick<GSDState, "phase" | "lastCompletedMilestone" | "activeMilestone">,
+  mid?: string | null,
+): Promise<{ skip: boolean; milestoneId?: string }> {
+  const closeoutMilestoneId = mid ?? s.currentMilestoneId ?? state.lastCompletedMilestone?.id;
+  if (s.completionStopInProgress) {
+    return { skip: true, milestoneId: closeoutMilestoneId };
+  }
+  if (!closeoutMilestoneId) {
+    return { skip: false };
+  }
+  if (isDbAvailable()) refreshWorkflowDatabaseFromDisk();
+  const closeoutBasePath = s.originalBasePath || s.canonicalProjectRoot || s.basePath;
+  let closeoutMergePending = false;
+  if (getIsolationMode(closeoutBasePath) !== "none") {
+    try {
+      const blockers = await findUnmergedCompletedMilestones(closeoutBasePath);
+      closeoutMergePending = blockers.some((blocker) => blocker.milestoneId === closeoutMilestoneId);
+    } catch {
+      // Fail open: without git/DB inspection we cannot safely treat closeout as done.
+      closeoutMergePending = true;
+    }
+  }
+  const milestoneAlreadyClosedOut = isDbAvailable()
+    && isClosedStatus(getMilestone(closeoutMilestoneId)?.status ?? "")
+    && !closeoutMergePending;
+  if (milestoneAlreadyClosedOut) {
+    return { skip: true, milestoneId: closeoutMilestoneId };
+  }
+  return { skip: false, milestoneId: closeoutMilestoneId };
+}
+
 // ─── runPreDispatch ───────────────────────────────────────────────────────────
 
 /**
@@ -1281,31 +1314,9 @@ export async function runPreDispatch(
   // ── Terminal conditions ──────────────────────────────────────────────
 
   if (state.phase === "complete") {
-    // Completion may be observed by more than one auto session; only the
-    // first closeout path should replay merge and notification side effects.
-    const closeoutMilestoneId = mid ?? s.currentMilestoneId ?? state.lastCompletedMilestone?.id;
-    if (isDbAvailable() && closeoutMilestoneId) refreshWorkflowDatabaseFromDisk();
-    const closeoutBasePath = s.originalBasePath || s.canonicalProjectRoot || s.basePath;
-    let closeoutMergePending = false;
-    if (closeoutMilestoneId && getIsolationMode(closeoutBasePath) !== "none") {
-      try {
-        const blockers = await findUnmergedCompletedMilestones(closeoutBasePath);
-        closeoutMergePending = blockers.some((blocker) => blocker.milestoneId === closeoutMilestoneId);
-      } catch {
-        // Fail open toward merge only when the DB does not already show this milestone closed.
-        const dbAlreadyClosed = isDbAvailable()
-          && isClosedStatus(getMilestone(closeoutMilestoneId)?.status ?? "");
-        if (!dbAlreadyClosed) {
-          closeoutMergePending = true;
-        }
-      }
-    }
-    const milestoneAlreadyClosedOut = closeoutMilestoneId
-      && isDbAvailable()
-      && isClosedStatus(getMilestone(closeoutMilestoneId)?.status ?? "")
-      && !closeoutMergePending;
-    if (s.completionStopInProgress || milestoneAlreadyClosedOut) {
-      debugLog("autoLoop", { phase: "complete", reason: "milestone-already-closed", milestoneId: closeoutMilestoneId });
+    const closeoutSkip = await shouldSkipTerminalMilestoneCloseout(s, state, mid);
+    if (closeoutSkip.skip) {
+      debugLog("autoLoop", { phase: "complete", reason: "milestone-already-closed", milestoneId: closeoutSkip.milestoneId });
       return { action: "break", reason: "milestone-complete" };
     }
   }
@@ -3217,6 +3228,16 @@ export async function runFinalize(
   }
 
   if (preUnitSnapshot?.type === "complete-milestone" && s.currentMilestoneId) {
+    const closeoutSkip = await shouldSkipTerminalMilestoneCloseout(
+      s,
+      iterData.state,
+      s.currentMilestoneId,
+    );
+    if (closeoutSkip.skip) {
+      debugLog("autoLoop", { phase: "complete", reason: "milestone-already-closed", milestoneId: closeoutSkip.milestoneId });
+      clearFinalizingUnit();
+      return { action: "break", reason: "milestone-complete" };
+    }
     const stop = await _runMilestoneMergeOnceWithStashRestore(ic, s.currentMilestoneId, {
       preserveCloseoutTranscript: true,
     });
