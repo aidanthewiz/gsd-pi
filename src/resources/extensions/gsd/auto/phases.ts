@@ -1279,6 +1279,17 @@ export async function runPreDispatch(
 
   // ── Terminal conditions ──────────────────────────────────────────────
 
+  if (state.phase === "complete") {
+    // Completion may be observed by more than one auto session; only the
+    // first closeout path should replay merge and notification side effects.
+    const closeoutMilestoneId = mid ?? s.currentMilestoneId ?? state.lastCompletedMilestone?.id;
+    if (isDbAvailable() && closeoutMilestoneId) refreshWorkflowDatabaseFromDisk();
+    if (s.completionStopInProgress || (closeoutMilestoneId && isDbAvailable() && isClosedStatus(getMilestone(closeoutMilestoneId)?.status ?? ""))) {
+      debugLog("autoLoop", { phase: "complete", reason: "milestone-already-closed", milestoneId: closeoutMilestoneId });
+      return { action: "break", reason: "milestone-complete" };
+    }
+  }
+
   if (!mid) {
     if (s.currentUnit) {
       await deps.closeoutUnit(
@@ -1399,13 +1410,6 @@ export async function runPreDispatch(
 
   // Terminal: complete
   if (state.phase === "complete") {
-    // Completion may be observed by more than one auto session; only the
-    // first closeout path should replay merge and notification side effects.
-    if (isDbAvailable() && mid) refreshWorkflowDatabaseFromDisk();
-    if (s.completionStopInProgress || (mid && isDbAvailable() && isClosedStatus(getMilestone(mid)?.status ?? ""))) {
-      debugLog("autoLoop", { phase: "complete", reason: "milestone-already-closed", milestoneId: mid });
-      return { action: "break", reason: "milestone-complete" };
-    }
     // Milestone merge on complete (before closeout so branch state is clean).
     if (s.currentMilestoneId) {
       // #2909 / #5538-followup: preflight stash + always-on postflight pop.
