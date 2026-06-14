@@ -3228,16 +3228,6 @@ export async function runFinalize(
   }
 
   if (preUnitSnapshot?.type === "complete-milestone" && s.currentMilestoneId) {
-    const closeoutSkip = await shouldSkipTerminalMilestoneCloseout(
-      s,
-      iterData.state,
-      s.currentMilestoneId,
-    );
-    if (closeoutSkip.skip) {
-      debugLog("autoLoop", { phase: "complete", reason: "milestone-already-closed", milestoneId: closeoutSkip.milestoneId });
-      clearFinalizingUnit();
-      return { action: "break", reason: "milestone-complete" };
-    }
     const stop = await _runMilestoneMergeOnceWithStashRestore(ic, s.currentMilestoneId, {
       preserveCloseoutTranscript: true,
     });
