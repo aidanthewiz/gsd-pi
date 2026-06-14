@@ -1401,6 +1401,7 @@ export async function runPreDispatch(
   if (state.phase === "complete") {
     // Completion may be observed by more than one auto session; only the
     // first closeout path should replay merge and notification side effects.
+    if (isDbAvailable() && mid) refreshWorkflowDatabaseFromDisk();
     if (s.completionStopInProgress || (mid && isDbAvailable() && isClosedStatus(getMilestone(mid)?.status ?? ""))) {
       debugLog("autoLoop", { phase: "complete", reason: "milestone-already-closed", milestoneId: mid });
       return { action: "break", reason: "milestone-complete" };
