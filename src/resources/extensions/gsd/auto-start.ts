@@ -1315,6 +1315,8 @@ export async function bootstrapAutoSession(
         formatStrandedWorkRecoveryMessage(strandedRecoveryAction),
         "info",
       );
+    } else if (lockedActiveMilestone) {
+      strandedRecoveryAction = null;
     }
 
     if (
