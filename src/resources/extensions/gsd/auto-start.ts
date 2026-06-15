@@ -1271,11 +1271,18 @@ export async function bootstrapAutoSession(
       }
     }
 
-    const blockingStrandedRecoveryAction = state.activeMilestone
+    const requestedMilestoneLock = process.env.GSD_MILESTONE_LOCK?.trim() || null;
+    const lockedActiveMilestone =
+      requestedMilestoneLock && state.activeMilestone?.id === requestedMilestoneLock;
+    const blockingStrandedRecoveryAction = lockedActiveMilestone
       ? strandedRecoveryActions.find(
-        (action) => action.milestoneId !== state.activeMilestone?.id,
-      ) ?? strandedRecoveryAction
-      : strandedRecoveryAction;
+        (action) => action.milestoneId === requestedMilestoneLock,
+      ) ?? null
+      : state.activeMilestone
+        ? strandedRecoveryActions.find(
+          (action) => action.milestoneId !== state.activeMilestone?.id,
+        ) ?? strandedRecoveryAction
+        : strandedRecoveryAction;
 
     if (blockingStrandedRecoveryAction) {
       if (!state.activeMilestone) {
