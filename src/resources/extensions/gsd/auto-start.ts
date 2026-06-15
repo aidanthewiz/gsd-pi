@@ -1271,11 +1271,29 @@ export async function bootstrapAutoSession(
       }
     }
 
-    const blockingStrandedRecoveryAction = state.activeMilestone
-      ? strandedRecoveryActions.find(
+    const requestedMilestoneLock = process.env.GSD_MILESTONE_LOCK?.trim() || null;
+    const lockedActiveMilestone =
+      requestedMilestoneLock && state.activeMilestone?.id === requestedMilestoneLock;
+    let blockingStrandedRecoveryAction: OrphanAuditAction | null;
+    if (lockedActiveMilestone) {
+      // Parallel worker or explicit `/gsd auto Mxxx`: sibling milestones'
+      // stranded work must not block this milestone's resumption, and the
+      // downstream `strandedRecoveryAction` (used for currentMilestoneId,
+      // setActiveMilestoneId, and adoptStrandedMilestone) must be scoped to
+      // the locked milestone only. Falling back to the first sibling action
+      // would mis-target adoption (#742).
+      const lockMatch = strandedRecoveryActions.find(
+        (action) => action.milestoneId === requestedMilestoneLock,
+      ) ?? null;
+      blockingStrandedRecoveryAction = lockMatch;
+      strandedRecoveryAction = lockMatch;
+    } else if (state.activeMilestone) {
+      blockingStrandedRecoveryAction = strandedRecoveryActions.find(
         (action) => action.milestoneId !== state.activeMilestone?.id,
-      ) ?? strandedRecoveryAction
-      : strandedRecoveryAction;
+      ) ?? strandedRecoveryAction;
+    } else {
+      blockingStrandedRecoveryAction = strandedRecoveryAction;
+    }
 
     if (blockingStrandedRecoveryAction) {
       if (!state.activeMilestone) {
@@ -1297,6 +1315,8 @@ export async function bootstrapAutoSession(
         formatStrandedWorkRecoveryMessage(strandedRecoveryAction),
         "info",
       );
+    } else if (lockedActiveMilestone) {
+      strandedRecoveryAction = null;
     }
 
     if (
