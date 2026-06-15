@@ -333,6 +333,60 @@ test("initResources refreshes a stale managed gsd-browser package skill", async 
   );
 });
 
+test("syncGsdBrowserPackageSkill preserves existing managed skill when the package is unresolvable", async (t) => {
+  const tmp = mkdtempSync(join(tmpdir(), "gsd-resource-loader-browser-skill-preserve-"));
+  const fakeAgentDir = join(tmp, ".gsd", "agent");
+  const restoreHomeEnv = overrideHomeEnv(tmp);
+
+  // Make @opengsd/gsd-browser unresolvable by temporarily renaming its
+  // node_modules entry. Restore on teardown regardless of test outcome.
+  const browserPkgDir = join(process.cwd(), "node_modules", "@opengsd", "gsd-browser");
+  const browserPkgBackup = `${browserPkgDir}.test-backup`;
+  const { renameSync } = await import("node:fs");
+
+  let renamed = false;
+  t.after(() => {
+    if (renamed) {
+      try { renameSync(browserPkgBackup, browserPkgDir); } catch { /* best effort */ }
+    }
+    restoreHomeEnv();
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const { initResources } = await import("../resource-loader.ts");
+
+  // Seed a known-good managed install from the real package while it is
+  // still resolvable.
+  initResources(fakeAgentDir);
+  const targetSkillPath = join(fakeAgentDir, "skills", "gsd-browser", "SKILL.md");
+  assert.equal(
+    existsSync(targetSkillPath),
+    true,
+    "test setup should install the managed gsd-browser skill",
+  );
+  const installedContent = readFileSync(targetSkillPath, "utf-8");
+
+  // Now make the package unresolvable.
+  renameSync(browserPkgDir, browserPkgBackup);
+  renamed = true;
+
+  // Force a sync attempt by deleting the manifest so initResources cannot
+  // short-circuit on the fingerprint.
+  rmSync(join(fakeAgentDir, "managed-resources.json"), { force: true });
+  initResources(fakeAgentDir);
+
+  assert.equal(
+    existsSync(targetSkillPath),
+    true,
+    "existing managed gsd-browser skill must be preserved when the package is unresolvable",
+  );
+  assert.equal(
+    readFileSync(targetSkillPath, "utf-8"),
+    installedContent,
+    "existing managed gsd-browser SKILL.md content must be preserved when the package is unresolvable",
+  );
+});
+
 test("bundled skill frontmatter is valid YAML", () => {
   const skillsDir = join(process.cwd(), "src", "resources", "skills");
   const skillNames = readdirSync(skillsDir, { withFileTypes: true })
