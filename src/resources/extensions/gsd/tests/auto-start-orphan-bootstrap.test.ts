@@ -126,6 +126,12 @@ function makeRepoWithOnlySiblingStrandedAndLockedActive(): string {
   const base = mkdtempSync(join(tmpdir(), "gsd-locked-no-stranded-bootstrap-"));
   mkdirSync(join(base, ".gsd", "milestones", "M001"), { recursive: true });
   mkdirSync(join(base, ".gsd", "milestones", "M002"), { recursive: true });
+  // M002 has CONTEXT so bootstrap's pre-planning gate doesn't route to
+  // showSmartEntry and the test reaches the post-lock session-init path.
+  writeFileSync(
+    join(base, ".gsd", "milestones", "M002", "M002-CONTEXT.md"),
+    "# M002 context\n",
+  );
   writeFileSync(
     join(base, ".gsd", "PREFERENCES.md"),
     "---\ngit:\n  isolation: \"none\"\n---\n",
