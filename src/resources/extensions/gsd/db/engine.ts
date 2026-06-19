@@ -18,7 +18,7 @@ import { createDbAdapter, type DbAdapter } from "../db-adapter.js";
 import { createBaseSchemaObjects } from "../db-base-schema.js";
 import { createCoordinationTablesV24 } from "../db-coordination-schema.js";
 import { createDbConnectionCache, type DbConnectionCacheEntry } from "../db-connection-cache.js";
-import { backupDatabaseBeforeMigration } from "../db-migration-backup.js";
+import { backupDatabaseBeforeMigration, isMigrationBackupError } from "../db-migration-backup.js";
 import {
   applyMigrationV2Artifacts,
   applyMigrationV3Memories,
@@ -603,8 +603,9 @@ export function openDatabase(path: string): boolean {
     initSchema(adapter, fileBacked, path);
   } catch (err) {
     // Corrupt freelist: DDL fails with "malformed" but VACUUM can rebuild.
-    // Attempt VACUUM recovery before giving up (see #2519).
-    if (fileBacked && err instanceof Error && err.message?.includes("malformed")) {
+    // Pre-migration backup failures are already pre-DDL and must propagate
+    // instead of being masked by VACUUM recovery (see #2519).
+    if (shouldAttemptVacuumRecovery(fileBacked, err)) {
       try {
         adapter.exec("VACUUM");
         initSchema(adapter, fileBacked, path);
@@ -635,6 +636,12 @@ export function openDatabase(path: string): boolean {
 
   return true;
 }
+
+function shouldAttemptVacuumRecovery(fileBacked: boolean, err: unknown): boolean {
+  return fileBacked && err instanceof Error && err.message.includes("malformed") && !isMigrationBackupError(err);
+}
+
+export const _shouldAttemptVacuumRecoveryForTest = shouldAttemptVacuumRecovery;
 
 export function closeDatabase(): void {
   if (currentDb) {
