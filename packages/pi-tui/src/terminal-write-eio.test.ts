@@ -1,9 +1,9 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
-import { Text } from "../src/components/text.ts";
-import { TUI } from "../src/tui.ts";
-import { isStdoutClosedError, ProcessTerminal } from "../src/terminal.ts";
-import type { Terminal } from "../src/terminal.ts";
+import { Text } from "./components/text.ts";
+import { isStdoutClosedError, ProcessTerminal } from "./terminal.ts";
+import type { Terminal } from "./terminal.ts";
+import { TUI } from "./tui.ts";
 
 describe("isStdoutClosedError", () => {
 	it("recognizes write EIO and other pipe-closed errors", () => {
