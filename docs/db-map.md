@@ -18,10 +18,16 @@ tools/workflow-tool-executors.ts  ← business logic
        ├── validation reads (milestones, slices, tasks)
        │
        ▼
-gsd-db.ts  ← barrel: re-exports the single-writer layer (callers import from here)
+gsd-db.ts  ← compatibility barrel over the explicit single-writer allowlist
        │
        ├── db/engine.ts     ← connection/handle, schema/migrations, transaction primitives
        ├── db/writers/*.ts  ← the Single Writer Layer (one write subsystem per file)
+       ├── db/{milestone-leases,unit-dispatches,auto-workers,runtime-kv,command-queue}.ts
+       │                    ← typed coordination/runtime writers
+       ├── db-memory-fts-schema.ts, db-schema-metadata.ts, db-verification-evidence-schema.ts
+       │                    ← allowlisted schema/migration helpers
+       ├── memory-backfill.ts
+       │                    ← allowlisted ADR migration/backfill helper
        ├── db/queries.ts    ← the Query Module (read-only SELECT wrappers)
        │
        ├── transaction()  (db/engine.ts via db-transaction.ts — depth counter, no nested BEGIN)
@@ -745,7 +751,7 @@ remain outside manifest restore.
 
 ## 7. Write Path Invariants
 
-1. **Single-writer rule**: all write SQL lives in the single-writer *layer* — `db/engine.ts` (schema/migrations + transaction primitives) and `db/writers/**` (one write subsystem per file). `gsd-db.ts` is a barrel re-exporting that layer (and still holds some wrappers mid-migration), so callers keep importing from it unchanged. `db/queries.ts` is the read-only Query Module and must contain no write SQL. No raw write SQL escapes to the adapter from anywhere else. Enforced by the structural `single-writer-invariant.test.ts`, which checks a directory predicate (not a single filename).
+1. **Single-writer rule**: all write SQL lives in the explicit single-writer *layer* — `db/engine.ts` for schema, migrations, lifecycle, and transaction primitives; `db/writers/**` for domain write subsystems; `gsd-db.ts` as the compatibility barrel and remaining mid-migration wrappers; the typed coordination/runtime writer modules `db/milestone-leases.ts`, `db/unit-dispatches.ts`, `db/auto-workers.ts`, `db/runtime-kv.ts`, and `db/command-queue.ts`; the schema/migration helpers `db-memory-fts-schema.ts`, `db-schema-metadata.ts`, and `db-verification-evidence-schema.ts`; and the ADR migration/backfill helper `memory-backfill.ts`. This is an allowlist, not permission for arbitrary raw writes under `db/`. `unit-ownership.ts` remains excluded because it owns a separate `.gsd/unit-claims.db`. `db/queries.ts` is the read-only Query Module and must contain no write SQL. No raw write SQL escapes to the adapter from anywhere else. Enforced by the structural `single-writer-invariant.test.ts`, which checks this allowlist.
 
 2. **Transaction wrapping**: every multi-table write uses `transaction()`. Rollback on any error. Re-entrant: nested calls increment depth counter; no nested BEGIN.
 
